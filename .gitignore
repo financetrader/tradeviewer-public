@@ -1,0 +1,59 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Environment files
+.env
+.env.local
+
+# Database files (contain user data)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Logs
+*.log
+logs/*.log
+
+# Backup files
+*.bak
+*.backup
+*_backup_*
+*.bak.*
+
+# Test files
+tests/
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+.coverage
+
+# Documentation archives
+docs/archive/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local development
+.env.local
+.env.*.local
+

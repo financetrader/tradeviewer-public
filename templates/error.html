@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Error {{ error_code }}{% endblock %}
+
+{% block content %}
+<h1>Error {{ error_code }}</h1>
+<p style="color: #8b92b0; margin-bottom: 20px;">{{ error_message }}</p>
+<div style="margin-top: 30px;">
+    <a href="/" class="btn">Return to Overview</a>
+    <a href="/admin" class="btn btn-secondary" style="margin-left: 10px;">Go to Wallets</a>
+</div>
+{% endblock %}
+

@@ -1,0 +1,647 @@
+{% extends "base.html" %}
+
+{% block title %}Portfolio Overview{% endblock %}
+
+{% block extra_head %}
+<script src="/static/chart.min.js"></script>
+{% endblock %}
+
+{% block navbar_right %}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <span class="current">📊 Portfolio Overview</span>
+</div>
+{% endblock %}
+
+{% block content %}
+
+    <div class="page-header">
+        <div>
+            <h1>Portfolio Overview</h1>
+            <div class="page-subtitle">
+                Period:
+                {% if period_label in ['24h', '7d', '30d'] %}
+                    {{ period_label }}
+                {% else %}
+                    {{ start }} to {{ end }}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Portfolio Aggregate Metrics -->
+    <div class="grid">
+        <div class="card-small">
+            <div class="muted">Total Equity</div>
+            <div class="big-number">${{ "%.2f"|format(total_equity) }}</div>
+        </div>
+        <div class="card-small">
+            <div class="muted">Realized PnL (Period)</div>
+            <div class="medium-number {% if total_realized_pnl >= 0 %}" style="color:#00ff88{% else %}" style="color:#ff4757{% endif %}">
+                {% if total_realized_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(total_realized_pnl) }}
+            </div>
+        </div>
+        <div class="card-small">
+            <div class="muted">Unrealized PnL</div>
+            <div class="medium-number {% if total_unrealized_pnl >= 0 %}' style='color:#00ff88{% else %}" style="color:#ff4757{% endif %}">
+                {% if total_unrealized_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(total_unrealized_pnl) }}
+            </div>
+        </div>
+        <div class="card-small">
+            <div class="muted">Win Rate (Period)</div>
+            <div class="medium-number">{{ "%.1f"|format(aggregate_win_rate) }}%</div>
+            <div class="muted" style="font-size: 0.8rem; margin-top: 5px;">{{ total_trade_count }} trades</div>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="card">
+        <h2>⚡ Quick Stats</h2>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+            <div style="padding: 15px;">
+                <div class="muted" style="font-size: 0.9rem; margin-bottom: 8px;">Win Rate</div>
+                <div class="medium-number" style="{% if aggregate_win_rate >= 50 %}color:#00ff88{% else %}color:#ff4757{% endif %}">
+                    {{ "%.1f"|format(aggregate_win_rate) }}%
+                </div>
+            </div>
+            <div style="padding: 15px;">
+                <div class="muted" style="font-size: 0.9rem; margin-bottom: 8px;">Total Trades</div>
+                <div class="medium-number">{{ total_trade_count }}</div>
+            </div>
+            <div style="padding: 15px;">
+                <div class="muted" style="font-size: 0.9rem; margin-bottom: 8px;">Avg Duration</div>
+                <div class="medium-number">{{ "%.1f"|format(avg_duration_hours) }}h</div>
+            </div>
+            <div style="padding: 15px;">
+                <div class="muted" style="font-size: 0.9rem; margin-bottom: 8px;">Best Trade</div>
+                <div class="medium-number" style="color:#00ff88">+${{ "%.2f"|format(best_trade) }}</div>
+            </div>
+            <div style="padding: 15px;">
+                <div class="muted" style="font-size: 0.9rem; margin-bottom: 8px;">Wallets</div>
+                <div class="medium-number">{{ active_wallets }} Active</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Time Period Selector -->
+    <div class="card">
+        <form method="GET" action="/" class="controls">
+            <label class="muted" style="font-weight: 600;">Time Period:</label>
+            <select name="period" onchange="toggleCustomDates()" id="periodSelect">
+                <option value="24h" {% if period_label=='24h' %}selected{% endif %}>Last 24 Hours</option>
+                <option value="7d" {% if period_label=='7d' %}selected{% endif %}>Last 7 Days</option>
+                <option value="30d" {% if period_label=='30d' %}selected{% endif %}>Last 30 Days</option>
+                <option value="custom" {% if period_label not in ['24h','7d','30d'] %}selected{% endif %}>Custom Range</option>
+            </select>
+            <div id="customDates" style="display: {% if period_label not in ['24h','7d','30d'] %}flex{% else %}none{% endif %}; gap: 10px;">
+                <input type="date" name="start" value="{{ start }}" />
+                <input type="date" name="end" value="{{ end }}" />
+            </div>
+            <button class="btn" type="submit">Apply</button>
+        </form>
+    </div>
+
+    <!-- Equity Chart -->
+    {% if equity_history and equity_history|length > 0 %}
+    <div class="card">
+        <h2>📈 Portfolio Equity Over Time</h2>
+        <div class="chart-container" style="position: relative; width: 100%; height: 400px;">
+            <canvas id="equityChart" style="display: block;"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Open Positions -->
+    {% if open_positions and open_positions|length > 0 %}
+    <div class="card">
+        <h2>📊 Open Positions</h2>
+        <div class="scroll-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Wallet</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th class="text-right">Size</th>
+                        <th class="text-right">Equity Used</th>
+                        <th class="text-right">Position Value</th>
+                        <th class="text-right">Leverage</th>
+                        <th class="text-right">Entry Price</th>
+                        <th class="text-right">Current Price</th>
+                        <th class="text-right">Unrealized PnL</th>
+                        <th>Strategy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pos in open_positions %}
+                    <tr>
+                        <td>
+                            <a href="/wallet/{{ pos.wallet_id }}" style="color: #00d4ff; text-decoration: none;">
+                                <strong>{{ pos.wallet_name }}</strong>
+                            </a>
+                        </td>
+                        <td><strong>{{ pos.symbol }}</strong></td>
+                        <td>
+                            {% if pos.side and pos.side.lower() in ['long', 'buy'] %}
+                                <span class="badge badge-primary">LONG</span>
+                            {% else %}
+                                <span class="badge">SHORT</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">{{ "%.4f"|format(pos.size) }}</td>
+                        <td class="text-right">
+                            <em>{% if pos.equity_used is not none %}${{ "%.2f"|format(pos.equity_used) }}{% else %}<span class="muted">-</span>{% endif %}</em>
+                        </td>
+                        <td class="text-right">${{ "%.2f"|format(pos.position_size_usd) }}</td>
+                        <td class="text-right">
+                            {% if pos.leverage %}
+                                {{ "%.1f"|format(pos.leverage) }}x
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">${{ "%.2f"|format(pos.entry_price) }}</td>
+                        <td class="text-right">
+                            {% if pos.current_price %}
+                                ${{ "%.2f"|format(pos.current_price) }}
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if pos.unrealized_pnl > 0 %}
+                                <span class="pill pill-pos">+${{ "%.2f"|format(pos.unrealized_pnl) }}</span>
+                            {% elif pos.unrealized_pnl < 0 %}
+                                <span class="pill pill-neg">${{ "%.2f"|format(pos.unrealized_pnl) }}</span>
+                            {% else %}
+                                <span class="pill pill-neutral">$0.00</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.85rem; color: #8b92b0;">
+                            {{ pos.strategy_name if pos.strategy_name else '-' }}
+                            {% if pos.timeInTrade is defined and pos.timeInTrade and pos.timeInTrade != "-" %}
+                                <span style="color: #8b92b0; margin-left: 8px; font-size: 0.75rem;">({{ pos.timeInTrade }})</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Strategy Performance & Symbol Performance -->
+    <div class="grid-2">
+        {% if strategy_performance and strategy_performance|length > 0 %}
+        <div class="card">
+            <h2>🎯 Strategy Performance (Period)</h2>
+            <div class="scroll-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th class="text-right">PnL</th>
+                            <th class="text-right">Trades</th>
+                            <th class="text-right">Win Rate</th>
+                            <th class="text-right">Avg PnL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for strat in strategy_performance[:10] %}
+                        <tr>
+                            <td><strong>{{ strat.strategy_name }}</strong></td>
+                            <td class="text-right">
+                                {% if strat.total_pnl > 0 %}
+                                    <span class="pill pill-pos">+${{ "%.2f"|format(strat.total_pnl) }}</span>
+                                {% elif strat.total_pnl < 0 %}
+                                    <span class="pill pill-neg">${{ "%.2f"|format(strat.total_pnl) }}</span>
+                                {% else %}
+                                    <span class="pill pill-neutral">$0.00</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">{{ strat.trade_count }}</td>
+                            <td class="text-right">
+                                {% if strat.win_rate >= 50 %}
+                                    <span class="pill pill-pos">{{ "%.1f"|format(strat.win_rate) }}%</span>
+                                {% else %}
+                                    <span class="pill pill-neg">{{ "%.1f"|format(strat.win_rate) }}%</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if strat.avg_pnl > 0 %}
+                                    <span style="color:#00ff88">+${{ "%.2f"|format(strat.avg_pnl) }}</span>
+                                {% elif strat.avg_pnl < 0 %}
+                                    <span style="color:#ff4757">${{ "%.2f"|format(strat.avg_pnl) }}</span>
+                                {% else %}
+                                    <span class="muted">$0.00</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if symbol_performance and symbol_performance|length > 0 %}
+        <div class="card">
+            <h2>💹 Top Symbols by PnL (Period)</h2>
+            <div class="scroll-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th class="text-right">PnL</th>
+                            <th class="text-right">Trades</th>
+                            <th class="text-right">Win Rate</th>
+                            <th class="text-right">Avg PnL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sym in symbol_performance %}
+                        <tr>
+                            <td><strong>{{ sym.symbol }}</strong></td>
+                            <td class="text-right">
+                                {% if sym.total_pnl > 0 %}
+                                    <span class="pill pill-pos">+${{ "%.2f"|format(sym.total_pnl) }}</span>
+                                {% elif sym.total_pnl < 0 %}
+                                    <span class="pill pill-neg">${{ "%.2f"|format(sym.total_pnl) }}</span>
+                                {% else %}
+                                    <span class="pill pill-neutral">$0.00</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">{{ sym.trade_count }}</td>
+                            <td class="text-right">
+                                {% if sym.win_rate >= 50 %}
+                                    <span class="pill pill-pos">{{ "%.1f"|format(sym.win_rate) }}%</span>
+                                {% else %}
+                                    <span class="pill pill-neg">{{ "%.1f"|format(sym.win_rate) }}%</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if sym.avg_pnl > 0 %}
+                                    <span style="color:#00ff88">+${{ "%.2f"|format(sym.avg_pnl) }}</span>
+                                {% elif sym.avg_pnl < 0 %}
+                                    <span style="color:#ff4757">${{ "%.2f"|format(sym.avg_pnl) }}</span>
+                                {% else %}
+                                    <span class="muted">$0.00</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Recent Activity -->
+    {% if recent_trades and recent_trades|length > 0 %}
+    <div class="card">
+        <h2>📋 Recent Trades</h2>
+        <div class="scroll-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Wallet</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th class="text-right">Size</th>
+                        <th class="text-right">Price</th>
+                        <th class="text-right">PnL</th>
+                        <th>Strategy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trade in recent_trades %}
+                    <tr>
+                        <td style="font-size: 0.85rem; color: #8b92b0;">{{ trade.createdAtFormatted }}</td>
+                        <td>
+                            {% if trade.wallet_name %}
+                                <a href="/wallet/{{ trade.wallet_id }}" style="color: #00d4ff; text-decoration: none;">
+                                    <strong>{{ trade.wallet_name }}</strong>
+                                </a>
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td><strong>{{ trade.symbol }}</strong></td>
+                        <td>
+                            {% if trade.side == 'buy' %}
+                                <span class="badge badge-primary">BUY</span>
+                            {% else %}
+                                <span class="badge">SELL</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">{{ "%.4f"|format(trade.size) }}</td>
+                        <td class="text-right">${{ "%.2f"|format(trade.price) }}</td>
+                        <td class="text-right">
+                            {% if trade.closedPnl > 0 %}
+                                <span class="pill pill-pos">+${{ "%.2f"|format(trade.closedPnl) }}</span>
+                            {% elif trade.closedPnl < 0 %}
+                                <span class="pill pill-neg">${{ "%.2f"|format(trade.closedPnl) }}</span>
+                            {% else %}
+                                <span class="pill pill-neutral">$0.00</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.85rem; color: #8b92b0;">
+                            {{ trade.strategy_name if trade.strategy_name else '-' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Connected Wallets -->
+    <div class="card">
+        <h2>💼 Connected Wallets</h2>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+            <button class="filter-btn active" onclick="filterWallets('all')">All</button>
+            <button class="filter-btn" onclick="filterWallets('apex_omni')">Apex Omni</button>
+            <button class="filter-btn" onclick="filterWallets('hyperliquid')">Hyperliquid</button>
+            <button class="filter-btn" onclick="filterWallets('property')">Property</button>
+            <span class="muted" style="margin-left: 10px;">|</span>
+            <button class="filter-btn" onclick="filterWallets('profitable')">Profitable</button>
+            <button class="filter-btn" onclick="filterWallets('losing')">Losing</button>
+            <input type="text" class="search-input" id="walletSearch" placeholder="🔍 Search wallets..." oninput="searchWallets()">
+        </div>
+
+        {% if wallets and wallets|length > 0 %}
+        <div class="scroll-table">
+            <table id="walletsTable">
+                <thead>
+                    <tr>
+                        <th>Wallet Name</th>
+                        <th>Provider</th>
+                        <th class="text-right">Equity</th>
+                        <th class="text-right">Unrealized PnL</th>
+                        <th class="text-right">Available</th>
+                        <th class="text-right">Positions</th>
+                        <th>Last Update</th>
+                        <th class="text-right">Realized PnL</th>
+                        <th class="text-right">Win Rate</th>
+                        <th class="text-right">Trades</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for w in wallets %}
+                    <tr class="wallet-row" data-provider="{{ w.provider }}" data-profitable="{% if w.realized_pnl > 0 %}true{% else %}false{% endif %}" data-name="{{ w.name|lower }}" data-wallet-id="{{ w.id }}" style="cursor: pointer;">
+                        <td><strong>{{ w.name }}</strong></td>
+                        <td>{{ w.provider.replace('_', ' ').title() }}</td>
+                        <td class="text-right">${{ "%.2f"|format(w.equity) }}</td>
+                        <td class="text-right">
+                            {% if w.unrealized_pnl > 0 %}
+                                <span class="pill pill-pos">+${{ "%.2f"|format(w.unrealized_pnl) }}</span>
+                            {% elif w.unrealized_pnl < 0 %}
+                                <span class="pill pill-neg">${{ "%.2f"|format(w.unrealized_pnl) }}</span>
+                            {% else %}
+                                <span class="pill pill-neutral">$0.00</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">${{ "%.2f"|format(w.available_balance) }}</td>
+                        <td class="text-right">
+                            {% if w.active_positions > 0 %}
+                                <span class="badge badge-primary">{{ w.active_positions }}</span>
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.85rem; color: #8b92b0;">{{ w.last_update }}</td>
+                        <td class="text-right">
+                            {% if w.realized_pnl > 0 %}
+                                <span class="pill pill-pos">+${{ "%.2f"|format(w.realized_pnl) }}</span>
+                            {% elif w.realized_pnl < 0 %}
+                                <span class="pill pill-neg">${{ "%.2f"|format(w.realized_pnl) }}</span>
+                            {% else %}
+                                <span class="pill pill-neutral">$0.00</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if w.trade_count > 0 %}
+                                {% if w.win_rate >= 50 %}
+                                    <span class="pill pill-pos">{{ "%.1f"|format(w.win_rate) }}%</span>
+                                {% else %}
+                                    <span class="pill pill-neg">{{ "%.1f"|format(w.win_rate) }}%</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">{{ w.trade_count }}</td>
+                        <td class="text-right">
+                            <a class="btn btn-secondary btn-small" href="/wallet/{{ w.id }}" onclick="event.stopPropagation();">View</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <div class="empty">No connected wallets found. <a href="/admin" style="color: #00d4ff;">Add a wallet</a> to get started.</div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// Equity Chart
+{% if equity_history and equity_history|length > 0 %}
+const equityData = {{ equity_history|tojson }};
+
+function initEquityChart() {
+    try {
+        console.log('=== EQUITY CHART INIT ===');
+        console.log('Data points:', equityData.length);
+
+        const canvas = document.getElementById('equityChart');
+        if (!canvas) {
+            console.error('❌ Canvas not found');
+            return false;
+        }
+
+        console.log('✓ Canvas found:', canvas);
+
+        // Ensure canvas has proper dimensions
+        const rect = canvas.parentElement.getBoundingClientRect();
+        console.log('Container dimensions:', rect.width, 'x', rect.height);
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            console.error('❌ Could not get 2D context');
+            return false;
+        }
+
+        console.log('✓ Context obtained');
+
+        new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: equityData.map(d => d.timestamp),
+            datasets: [{
+                label: 'Total Equity',
+                data: equityData.map(d => d.total_equity),
+                borderColor: '#00d4ff',
+                backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: '#151a33',
+                    titleColor: '#00d4ff',
+                    bodyColor: '#e0e0e0',
+                    borderColor: '#1e2645',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: function(context) {
+                            return 'Equity: $' + context.parsed.y.toFixed(2);
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        color: '#1e2645',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#8b92b0',
+                        maxRotation: 45,
+                        minRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 10
+                    }
+                },
+                y: {
+                    grid: {
+                        color: '#1e2645',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#8b92b0',
+                        callback: function(value) {
+                            return '$' + value.toFixed(0);
+                        }
+                    }
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
+            }
+        }
+        });
+        console.log('✓ Chart created successfully');
+        return true;
+    } catch(error) {
+        console.error('❌ Chart initialization error:', error);
+        console.error('Stack:', error.stack);
+        return false;
+    }
+}
+
+// Call when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initEquityChart);
+} else {
+    initEquityChart();
+}
+{% endif %}
+
+// Custom dates toggle
+function toggleCustomDates() {
+    const select = document.getElementById('periodSelect');
+    const customDates = document.getElementById('customDates');
+    if (select.value === 'custom') {
+        customDates.style.display = 'flex';
+    } else {
+        customDates.style.display = 'none';
+    }
+}
+
+// Wallet filtering
+function filterWallets(filter) {
+    const rows = document.querySelectorAll('.wallet-row');
+    const buttons = document.querySelectorAll('.filter-btn');
+
+    // Update active button
+    buttons.forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    rows.forEach(row => {
+        const provider = row.dataset.provider;
+        const profitable = row.dataset.profitable === 'true';
+
+        let show = false;
+        if (filter === 'all') {
+            show = true;
+        } else if (filter === 'profitable') {
+            show = profitable;
+        } else if (filter === 'losing') {
+            show = !profitable;
+        } else {
+            show = provider === filter;
+        }
+
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+// Wallet search
+function searchWallets() {
+    const searchTerm = document.getElementById('walletSearch').value.toLowerCase();
+    const rows = document.querySelectorAll('.wallet-row');
+
+    rows.forEach(row => {
+        const name = row.dataset.name;
+        if (name.includes(searchTerm)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+
+// Make wallet rows clickable
+document.addEventListener('DOMContentLoaded', function() {
+    const walletRows = document.querySelectorAll('.wallet-row');
+    walletRows.forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Don't navigate if clicking on the View button (it has its own link)
+            if (e.target.closest('a.btn')) {
+                return;
+            }
+            const walletId = this.dataset.walletId;
+            if (walletId) {
+                window.location.href = `/wallet/${walletId}`;
+            }
+        });
+    });
+});
+</script>
+
+{% endblock %}

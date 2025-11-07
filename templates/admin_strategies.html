@@ -1,0 +1,490 @@
+{% extends "base.html" %}
+
+{% block title %}Strategy Management{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="/">📊 Overview</a>
+    <span class="separator">›</span>
+    <a href="/admin">💼 Wallets</a>
+    <span class="separator">›</span>
+    <span class="current">🎯 Strategies</span>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+    .form-group {
+        margin-bottom: 15px;
+    }
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        color: #8b92b0;
+        font-size: 0.9rem;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 10px;
+        background: #1a1f3a;
+        border: 1px solid #252b4a;
+        border-radius: 4px;
+        color: #fff;
+        font-size: 0.9rem;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: #00d4ff;
+        box-shadow: 0 0 5px rgba(0, 212, 255, 0.3);
+    }
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+    }
+    .btn-danger {
+        background: #ff4757;
+        color: #fff;
+    }
+    .btn-danger:hover {
+        background: #ff3742;
+    }
+    .tab-btn {
+        padding: 10px 20px;
+        background: none;
+        border: none;
+        color: #8b92b0;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .tab-btn:hover {
+        color: #00d4ff;
+    }
+    .tab-btn.active {
+        color: #00d4ff;
+        border-bottom-color: #00d4ff;
+    }
+    .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 15px;
+    }
+    .card {
+        background: #1a1f3a;
+        border: 1px solid #252b4a;
+        border-radius: 6px;
+        padding: 15px;
+    }
+    .card label {
+        display: block;
+        margin-bottom: 5px;
+        color: #8b92b0;
+        font-size: 0.9rem;
+    }
+    .back {
+        background: #252b4a;
+        color: #fff;
+        margin-bottom: 15px;
+        display: inline-block;
+    }
+    .inactive-pair {
+        opacity: 0.6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Strategy Management</h1>
+
+<!-- Flash Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 12px;">
+            {% for category, message in messages %}
+                <div class="card" style="border-left: 4px solid {{ 'rgba(0,255,136,0.8)' if category=='success' else 'rgba(255,71,87,0.8)' }};">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="section">
+    <h2>Strategy Management</h2>
+
+        <!-- Tab Navigation -->
+        <div style="display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 2px solid #1e2645;">
+            <button class="tab-btn active" onclick="showStratTab('single')" id="strat-tab-single">Add Single</button>
+            <button class="tab-btn" onclick="showStratTab('bulk')" id="strat-tab-bulk">Bulk Add</button>
+            <button class="tab-btn" onclick="showStratTab('catalog')" id="strat-tab-catalog">Strategy Catalog</button>
+        </div>
+
+        <!-- Single Add Form -->
+        <div id="form-single">
+            <form method="POST" action="{{ url_for('admin_add_strategy') }}">
+                {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
+                <div class="grid">
+                    <div class="card">
+                        <label>Name</label>
+                        <input type="text" name="name" placeholder="e.g., MeanReversion v1" required>
+                    </div>
+                    <div class="card">
+                        <label>Description (optional)</label>
+                        <input type="text" name="description" placeholder="Notes about parameters, risk, etc.">
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <button class="btn btn-primary" type="submit">Add Strategy</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Bulk Add Form -->
+        <div id="form-bulk" style="display: none;">
+            <form method="POST" action="{{ url_for('admin_bulk_add_strategies') }}">
+                {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
+                <div class="card">
+                    <label style="font-weight: 600; margin-bottom: 8px; display: block;">Strategy Names (one per line)</label>
+                    <textarea name="strategies" rows="10" placeholder="Strategy Name 1&#10;Strategy Name 2&#10;Strategy Name 3&#10;..."
+                        style="width:100%; padding:10px; background:#1a1f3a; border:1px solid #252b4a; border-radius:4px; color:#fff; font-family: monospace; resize: vertical;" required></textarea>
+                    <div style="color:#8b92b0; font-size:0.85rem; margin-top:8px;">
+                        💡 Tip: Enter one strategy name per line. Descriptions can be added later by editing individual strategies.
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <button class="btn btn-primary" type="submit">Bulk Add Strategies</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Strategy Catalog -->
+        <div id="form-catalog" style="display: none;">
+            <table style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>Strategy Name</th>
+                        <th>Description</th>
+                        <th>Created</th>
+                        <th style="width: 200px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in strategies %}
+                    <tr>
+                        <td style="font-weight: 600;">{{ s.name }}</td>
+                        <td style="color:#8b92b0;">{{ s.description or '—' }}</td>
+                        <td style="color:#8b92b0;">{{ s.created_at.strftime('%Y-%m-%d') if s.created_at else '—' }}</td>
+                        <td>
+                            <button class="btn" style="padding: 6px 12px; font-size: 0.85rem; background: #252b4a; color: #fff; margin-right: 8px;"
+                                onclick="editStrategy({{ s.id }}, '{{ s.name|replace("'", "\\'") }}', '{{ s.description|replace("'", "\\'") if s.description else '' }}')">
+                                Modify
+                            </button>
+                            <form method="POST" action="{{ url_for('admin_delete_strategy', strategy_id=s.id) }}" style="display: inline;"
+                                onsubmit="return confirm('Delete strategy \'{{ s.name }}\'? This will not affect existing assignments.')">
+                                {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
+                                <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.85rem;" type="submit">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if strategies|length == 0 %}
+                    <tr><td colspan="4" style="color:#8b92b0; text-align: center;">No strategies yet.</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+        function showStratTab(tab) {
+            // Hide all forms
+            document.getElementById('form-single').style.display = 'none';
+            document.getElementById('form-bulk').style.display = 'none';
+            document.getElementById('form-catalog').style.display = 'none';
+
+            // Reset all tabs
+            document.getElementById('strat-tab-single').classList.remove('active');
+            document.getElementById('strat-tab-bulk').classList.remove('active');
+            document.getElementById('strat-tab-catalog').classList.remove('active');
+
+            // Show selected form and highlight tab
+            if (tab === 'single') {
+                document.getElementById('form-single').style.display = 'block';
+                document.getElementById('strat-tab-single').classList.add('active');
+            } else if (tab === 'bulk') {
+                document.getElementById('form-bulk').style.display = 'block';
+                document.getElementById('strat-tab-bulk').classList.add('active');
+            } else if (tab === 'catalog') {
+                document.getElementById('form-catalog').style.display = 'block';
+                document.getElementById('strat-tab-catalog').classList.add('active');
+            }
+        }
+
+            function editStrategy(id, name, description) {
+                // You can implement a modal or redirect to edit page
+                const newName = prompt('Strategy Name:', name);
+                if (newName === null) return; // Cancelled
+
+                const newDesc = prompt('Description (optional):', description);
+                if (newDesc === null) return; // Cancelled
+
+                // Create a form and submit
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/admin/strategies/edit/' + id;
+
+                // Add CSRF token
+                {% if config.WTF_CSRF_ENABLED %}
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrf_token';
+                csrfInput.value = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                form.appendChild(csrfInput);
+                {% endif %}
+
+                const nameInput = document.createElement('input');
+                nameInput.type = 'hidden';
+                nameInput.name = 'name';
+                nameInput.value = newName;
+                form.appendChild(nameInput);
+
+                const descInput = document.createElement('input');
+                descInput.type = 'hidden';
+                descInput.name = 'description';
+                descInput.value = newDesc;
+                form.appendChild(descInput);
+
+                document.body.appendChild(form);
+                form.submit();
+            }
+        </script>
+    </div>
+
+    <div class="section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2 style="color:#00d4ff; border-bottom:2px solid #1e2645; padding-bottom:8px; margin:0;">Strategy Assignments Matrix</h2>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="showInactive" onchange="toggleInactive()" checked>
+                <span style="color: #8b92b0; font-size: 0.9rem;">Hide inactive pairs</span>
+            </label>
+        </div>
+
+        {% if matrix_data|length == 0 %}
+        <div class="card" style="color:#8b92b0;">
+            No wallets with trading history found. Trade on your wallets first, or use the form below to manually add a pair.
+        </div>
+        {% else %}
+        <div style="overflow-x: auto;">
+            <table style="margin-top:15px; min-width: 100%;">
+                <thead>
+                    <tr>
+                        <th style="position: sticky; left: 0; background:#1a1f3a; z-index: 2;">Wallet</th>
+                        <th style="min-width: 200px;">Symbol / Notes</th>
+                        <th>Strategy</th>
+                        <th style="width: 120px;">Trades</th>
+                        <th style="width: 140px;">Last Modified</th>
+                        <th style="width: 200px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in matrix_data %}
+                        {% if row.symbols|length > 0 %}
+                            {% for symbol_data in row.symbols %}
+                            <tr class="pair-row {{ 'inactive-pair' if not symbol_data.is_current else '' }}" data-is-current="{{ symbol_data.is_current|lower }}">
+                                <td style="position: sticky; left: 0; background:#1a1f3a; font-weight: 600;">
+                                    {{ row.wallet_name }}
+                                </td>
+                                <td>
+                                    <div style="font-weight: 600;">{{ symbol_data.symbol }}</div>
+                                    {% if symbol_data.notes %}
+                                    <div style="color: #8b92b0; font-size: 0.85rem; font-style: italic; margin-top: 4px;">
+                                        {{ symbol_data.notes }}
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if symbol_data.strategy_id %}
+                                        <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00d4ff;"></span>
+                                            {{ symbol_data.strategy_name }}
+                                        </span>
+                                    {% else %}
+                                        <span style="color:#8b92b0;">—</span>
+                                    {% endif %}
+                                </td>
+                                <td style="text-align: center; color:#00d4ff; font-weight: 600;">
+                                    {{ symbol_data.trade_count }}
+                                </td>
+                                <td style="color:#8b92b0; font-size: 0.9rem;">
+                                    {% if symbol_data.modified_at %}
+                                        {{ symbol_data.modified_at.strftime('%Y-%m-%d %H:%M') }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.85rem;"
+                                        onclick="assignStrategy({{ row.wallet_id }}, '{{ symbol_data.symbol }}', {{ symbol_data.strategy_id or 'null' }}, '{{ symbol_data.notes|replace("'", "\\'") if symbol_data.notes else '' }}', {{ symbol_data.is_current|lower }})">
+                                        {% if symbol_data.strategy_id %}Change{% else %}Assign{% endif %}
+                                    </button>
+                                    {% if symbol_data.assignment_id %}
+                                    <form method="POST" action="/admin/strategies/assignment/{{ symbol_data.assignment_id }}/delete" style="display: inline;"
+                                        onsubmit="return confirm('Delete this pairing? This action cannot be undone.')">
+                                        {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
+                                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.85rem;" type="submit">Delete</button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td style="position: sticky; left: 0; background:#1a1f3a; font-weight: 600;">{{ row.wallet_name }}</td>
+                                <td colspan="3" style="color:#8b92b0;">No traded symbols yet</td>
+                            </tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <!-- Manual Pair Addition -->
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #1e2645;">
+            <h3 style="color:#00d4ff; font-size: 1.1rem; margin-bottom: 12px;">Add Symbol Manually</h3>
+            <form method="POST" action="{{ url_for('admin_assign_strategy') }}">
+                {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
+                <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                    <div class="card">
+                        <label>Wallet</label>
+                        <select name="wallet_id" required>
+                            {% for w in wallets %}
+                              <option value="{{ w.id }}">{{ w.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="card">
+                        <label>Symbol / Pair</label>
+                        <input type="text" name="symbol" placeholder="e.g., BTC-USDT" required>
+                    </div>
+                    <div class="card">
+                        <label>Strategy</label>
+                        <select name="strategy_id" required>
+                            {% for s in strategies %}
+                              <option value="{{ s.id }}">{{ s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="card">
+                        <label>Notes (optional)</label>
+                        <input type="text" name="notes" placeholder="e.g., Traded by mistake, Testing">
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <button class="btn btn-primary" type="submit">Add & Assign Strategy</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Assignment Modal -->
+    <div id="assignModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: #151a33; border: 1px solid #1e2645; border-radius: 8px; padding: 25px; max-width: 500px; width: 90%;">
+            <h3 style="color: #00d4ff; margin-bottom: 15px;">Assign Strategy</h3>
+            <form id="assignForm" method="POST" action="{{ url_for('admin_assign_strategy') }}">
+                {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
+                <input type="hidden" name="wallet_id" id="modal_wallet_id">
+                <input type="hidden" name="symbol" id="modal_symbol">
+
+                <div class="card">
+                    <label style="display: block; margin-bottom: 8px;">Wallet & Symbol</label>
+                    <div style="color: #8b92b0; font-size: 0.9rem; margin-bottom: 12px;" id="modal_wallet_symbol"></div>
+
+                    <label style="display: block; margin-bottom: 8px;">Select Strategy</label>
+                    <select name="strategy_id" id="modal_strategy_id" style="width: 100%; padding: 10px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff;" required>
+                        <option value="">-- Select Strategy --</option>
+                        {% for s in strategies %}
+                          <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+
+                    <label style="display: block; margin-top: 12px; margin-bottom: 8px;">Notes (optional)</label>
+                    <textarea name="notes" id="modal_notes" rows="3" placeholder="e.g., Traded by mistake, Testing strategy, etc."
+                        style="width: 100%; padding: 10px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; resize: vertical;"></textarea>
+
+                    <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
+                        <input type="checkbox" name="is_current" id="modal_is_current" value="1" checked>
+                        <span style="color: #e0e0e0;">Currently in use</span>
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Assign</button>
+                    <button type="button" class="btn" style="background: #252b4a; color: #fff;" onclick="closeModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function assignStrategy(walletId, symbol, currentStrategyId, currentNotes, isCurrent) {
+            document.getElementById('modal_wallet_id').value = walletId;
+            document.getElementById('modal_symbol').value = symbol;
+            document.getElementById('modal_wallet_symbol').textContent = `Wallet ${walletId} → ${symbol}`;
+
+            // Set current strategy as selected
+            const strategySelect = document.getElementById('modal_strategy_id');
+            if (currentStrategyId) {
+                strategySelect.value = currentStrategyId;
+            } else {
+                strategySelect.value = '';
+            }
+
+            // Set current notes
+            const notesTextarea = document.getElementById('modal_notes');
+            notesTextarea.value = currentNotes || '';
+
+            // Set is_current checkbox
+            const isCurrentCheckbox = document.getElementById('modal_is_current');
+            isCurrentCheckbox.checked = isCurrent !== false;
+
+            // Show modal
+            const modal = document.getElementById('assignModal');
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('assignModal').style.display = 'none';
+        }
+
+        function toggleInactive() {
+            const hideInactive = document.getElementById('showInactive').checked;
+            const inactiveRows = document.querySelectorAll('.inactive-pair');
+
+            inactiveRows.forEach(row => {
+                if (hideInactive) {
+                    row.style.display = 'none';
+                } else {
+                    row.style.display = '';
+                }
+            });
+        }
+
+        // Close modal on outside click
+        document.getElementById('assignModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+{% endblock %}

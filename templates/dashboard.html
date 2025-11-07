@@ -1,0 +1,968 @@
+{% extends "base.html" %}
+
+{% block title %}{{ wallet_name or "Wallet Dashboard" }}{% endblock %}
+
+{% block extra_head %}
+<script src="/static/chart.min.js"></script>
+<style>
+    .tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #1e2645;
+    }
+    .tab {
+        padding: 10px 20px;
+        cursor: pointer;
+        background: transparent;
+        border: none;
+        color: #8b92b0;
+        font-size: 1rem;
+        font-weight: 500;
+        border-bottom: 3px solid transparent;
+        transition: all 0.3s;
+    }
+    .tab:hover { color: #00d4ff; }
+    .tab.active {
+        color: #00d4ff;
+        border-bottom-color: #00d4ff;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .chart-container { position: relative; height: 400px; margin-bottom: 20px; }
+    .time-filters { display: flex; gap: 10px; margin-bottom: 15px; }
+    .time-filter-btn {
+        padding: 8px 16px;
+        background: #1a1f3a;
+        border: 1px solid #1e2645;
+        color: #8b92b0;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.3s;
+    }
+    .time-filter-btn:hover { color: #00d4ff; border-color: #00d4ff; }
+    .time-filter-btn.active { background: #00d4ff; color: #0a0e27; border-color: #00d4ff; }
+    .card { background: #1a1f3a; padding: 15px; border-radius: 6px; border: 1px solid #252b4a; }
+    .card-title { font-size: 0.85rem; color: #8b92b0; margin-bottom: 5px; }
+    .card-value { font-size: 1.2rem; font-weight: 600; color: #fff; }
+    .positive { color: #00ff88; }
+    .negative { color: #ff4757; }
+    .badge-long { background: #00ff8844; color: #00ff88; }
+    .badge-short { background: #ff475744; color: #ff4757; }
+    .badge-buy { background: #00ff8844; color: #00ff88; }
+    .badge-sell { background: #ff475744; color: #ff4757; }
+    .badge-open { background: #00d4ff44; color: #00d4ff; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="/">📊 Overview</a>
+    <span class="separator">›</span>
+    <span class="current">{{ wallet_name or "Wallet" }}</span>
+</div>
+{% endblock %}
+
+{% block navbar_right %}
+<div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+    {% if all_wallets and all_wallets|length > 1 %}
+    <div>
+        <label for="walletSelect" style="font-size: 0.75rem; color: #8b92b0; display: block; margin-bottom: 4px;">Switch Wallet</label>
+        <select id="walletSelect" onchange="switchWallet()" style="padding: 8px 12px; background: #1a1f3a; color: #e0e0e0; border: 1px solid #1e2645; border-radius: 4px; font-size: 0.9rem; min-width: 200px;">
+            {% for wallet in all_wallets %}
+            <option value="{{ wallet.id }}" {% if wallet.id == wallet_id %}selected{% endif %}>
+                {{ wallet.name }} ({{ wallet.provider }})
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
+
+    <div style="text-align: right;">
+        <div style="font-size: 0.75rem; color: #8b92b0;">Last Updated</div>
+        <div style="font-size: 0.9rem; color: #00d4ff; font-weight: 600;">{{ last_update }}</div>
+    </div>
+
+    <button onclick="location.reload()" class="btn" style="padding: 10px 18px;">
+        🔄 Refresh
+    </button>
+
+    {% if current_user and current_user.is_authenticated %}
+        <div style="font-size: 0.9rem; color: #8b92b0;">
+            👤 {{ current_user.name }}
+            {% if current_user.is_admin %}<span style="color: #00d4ff; font-weight: 600;">(Admin)</span>{% endif %}
+        </div>
+        <a href="/logout" class="nav-link nav-link-secondary" style="padding: 8px 16px;">🚪 Logout</a>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+
+    <div class="page-header">
+        <h1>{{ wallet_name or "Wallet Dashboard" }}</h1>
+    </div>
+
+        <!-- Balances Overview -->
+        <div class="section">
+            <h2>Account Balance</h2>
+            <div class="grid">
+                <div class="card">
+                    <div class="card-title">Total Equity</div>
+                    <div class="card-value">${{ "%.2f"|format(balance_data.totalEquityValue|float) }}</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Available Balance</div>
+                    <div class="card-value">${{ "%.2f"|format(balance_data.availableBalance|float) }}</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Unrealized PnL</div>
+                    <div class="card-value {% if balance_data.unrealizedPnl|float >= 0 %}positive{% else %}negative{% endif %}">
+                        ${{ "%.2f"|format(balance_data.unrealizedPnl|float) }}
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Realized PnL</div>
+                    <div class="card-value {% if balance_data.realizedPnl|float >= 0 %}positive{% else %}negative{% endif %}">
+                        ${{ "%.2f"|format(balance_data.realizedPnl|float) }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Equity Chart with Tabs -->
+        <div class="section">
+            <h2>Equity History</h2>
+
+            <!-- Tabs for Equity views -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchEquityTab(event, 'equity-total')">Total</button>
+                <button class="tab" onclick="switchEquityTab(event, 'equity-by-symbol')">By Symbol</button>
+            </div>
+
+            <!-- Total Equity Tab -->
+            <div id="equity-total" class="tab-content active">
+                <div class="time-filters">
+                    <button class="time-filter-btn" onclick="filterChart(event, '24h')">24 Hours</button>
+                    <button class="time-filter-btn" onclick="filterChart(event, '7d')">7 Days</button>
+                    <button class="time-filter-btn" onclick="filterChart(event, '30d')">30 Days</button>
+                    <button class="time-filter-btn active" onclick="filterChart(event, 'all')">All Time</button>
+                </div>
+                <div class="chart-container">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- By Symbol PnL Tab -->
+            <div id="equity-by-symbol" class="tab-content">
+                <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: center;">
+                    <div>
+                        <div class="card-title">Symbol</div>
+                        <select id="symbolSelect" style="width: 100%; padding: 8px; background: #1a1f3a; color: #e0e0e0; border: 1px solid #1e2645; border-radius: 4px;">
+                            <option value="__ALL_TRADES__">All Trades (Realized)</option>
+                            {% for s in symbols %}
+                            <option value="{{ s }}">{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <div class="card-title">Time Range</div>
+                        <div class="time-filters">
+                            <button class="time-filter-btn" onclick="filterSymbolChart(event, '24h')">24 Hours</button>
+                            <button class="time-filter-btn" onclick="filterSymbolChart(event, '7d')">7 Days</button>
+                            <button class="time-filter-btn" onclick="filterSymbolChart(event, '30d')">30 Days</button>
+                            <button class="time-filter-btn active" onclick="filterSymbolChart(event, 'all')">All Time</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="symbolPnlChart"></canvas>
+                </div>
+                <div class="card-title">Relative to 0 within selected period</div>
+            </div>
+        </div>
+
+        <!-- Wallets -->
+        <div class="section">
+            <h2>Wallets</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Wallet Type</th>
+                        <th>Token</th>
+                        <th>Balance</th>
+                        <th>Pending Deposit</th>
+                        <th>Pending Withdraw</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for wallet in contract_wallets %}
+                    <tr>
+                        <td>Contract Wallets</td>
+                        <td>{{ wallet.token }}</td>
+                        <td>
+                            {% if wallet.balance is defined %}
+                                ${{ "%.2f"|format(wallet.balance|float) }}
+                            {% elif wallet.availableBalance is defined %}
+                                ${{ "%.2f"|format(wallet.availableBalance|float) }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>${{ "%.2f"|format(wallet.pendingDepositAmount|float) }}</td>
+                        <td>${{ "%.2f"|format(wallet.pendingWithdrawAmount|float) }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% for wallet in spot_wallets %}
+                    {% if wallet.balance|float > 0 or wallet.pendingDepositAmount|float > 0 or wallet.pendingWithdrawAmount|float > 0 %}
+                    <tr>
+                        <td>Spot Wallets</td>
+                        <td>{{ wallet.tokenId }}</td>
+                        <td>${{ "%.2f"|format(wallet.balance|float) }}</td>
+                        <td>${{ "%.2f"|format(wallet.pendingDepositAmount|float) }}</td>
+                        <td>${{ "%.2f"|format(wallet.pendingWithdrawAmount|float) }}</td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Positions -->
+        <div class="section">
+            <h2>Positions</h2>
+            {% if positions %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Size</th>
+                        <th>Equity Used</th>
+                        <th>Position Size (USD)</th>
+                        <th>Entry Price</th>
+                        <th>Current Price</th>
+                        <th>Leverage</th>
+                        <th>Unrealized PnL</th>
+                        <th>Funding Fee</th>
+                        <th>Opened</th>
+                        <th>Strategy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pos in positions %}
+                    {% if pos.size|float != 0 %}
+                    <tr>
+                        <td><strong>{{ pos.symbol }}</strong></td>
+                        <td><span class="badge badge-{{ pos.side|lower }}">{{ pos.side }}</span></td>
+                        <td>{{ pos.size }}</td>
+                        <td><em>{% if pos.equityUsed is not none %}${{ "%.2f"|format(pos.equityUsed) }}{% else %}-{% endif %}</em></td>
+                        <td>${{ "%.2f"|format(pos.positionSizeUsd) }}</td>
+                        <td>${{ "%.2f"|format(pos.entryPrice|float) }}</td>
+                        <td>{% if pos.currentPrice %}${{ "%.2f"|format(pos.currentPrice) }}{% else %}-{% endif %}</td>
+                        <td>{% if pos.leverage %}{{ "%.1f"|format(pos.leverage) }}x{% else %}-{% endif %}</td>
+                        <td class="{% if pos.unrealizedPnl >= 0 %}positive{% else %}negative{% endif %}">
+                            ${{ "%.2f"|format(pos.unrealizedPnl) }}
+                        </td>
+                        <td class="{% if pos.fundingFee|float >= 0 %}positive{% else %}negative{% endif %}">
+                            ${{ "%.2f"|format(pos.fundingFee|float) }}
+                        </td>
+                        <td style="font-size: 0.85rem;">{{ pos.openedFormatted }}</td>
+                        <td style="font-size: 0.85rem; color: #00d4ff;">
+                            {% if pos.strategy_name %}{{ pos.strategy_name }}{% else %}-{% endif %}
+                            {% if pos.timeInTrade is defined and pos.timeInTrade and pos.timeInTrade != "-" and pos.timeInTrade != "" %}
+                                <span style="color: #8b92b0; margin-left: 8px; font-size: 0.75rem;">({{ pos.timeInTrade }})</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">No positions</div>
+            {% endif %}
+        </div>
+
+        <!-- Open Orders -->
+        <div class="section">
+            <h2>Open Orders</h2>
+            {% if orders %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Created</th>
+                        <th>Side</th>
+                        <th>Type</th>
+                        <th>Size</th>
+                        <th>Position Size (USD)</th>
+                        <th>Price</th>
+                        <th>Trigger Price</th>
+                        <th>Status</th>
+                        <th>Reduce Only</th>
+                        <th>Strategy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td><strong>{{ order.symbol }}</strong></td>
+                        <td style="font-size: 0.85rem;">{{ order.createdAtFormatted if order.createdAtFormatted else '-' }}</td>
+                        <td><span class="badge badge-{{ order.side|lower }}">{{ order.side }}</span></td>
+                        <td>{{ order.type }}</td>
+                        <td>{{ order.size }}</td>
+                        <td>${{ "%.2f"|format((order.price|float * order.size|float)) }}</td>
+                        <td>${{ "%.2f"|format(order.price|float) }}</td>
+                        <td>{% if order.triggerPrice != "0" %}${{ "%.2f"|format(order.triggerPrice|float) }}{% else %}-{% endif %}</td>
+                        <td><span class="badge badge-open">{{ order.status }}</span></td>
+                        <td>{{ order.reduceOnly }}</td>
+                        <td style="font-size: 0.85rem; color: #00d4ff;">
+                            {% if order.strategy_name %}{{ order.strategy_name }}{% else %}-{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty">No open orders</div>
+            {% endif %}
+        </div>
+
+        <!-- Trade History with Tabs -->
+        <div class="section">
+            <h2>Trade History</h2>
+            
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab(event, 'closed-pnl')">Closed P&L ({{ closed_pnl|length }})</button>
+                <button class="tab" onclick="switchTab(event, 'all-orders')">All Orders ({{ fills|length }})</button>
+            </div>
+            
+            <!-- Closed P&L Tab -->
+            <div id="closed-pnl" class="tab-content active">
+                {% if closed_pnl %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Side</th>
+                            <th>Symbol</th>
+                            <th>Size</th>
+                            <th>Equity Used</th>
+                            <th>Position Size (USD)</th>
+                            <th>Entry Price</th>
+                            <th>Exit Price</th>
+                            <th>Trade Type</th>
+                            <th>Closed P&L</th>
+                            <th>Strategy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pnl in closed_pnl %}
+                        <tr>
+                            <td style="font-size: 0.85rem;">{{ pnl.createdAtFormatted }}</td>
+                            <td><span class="badge badge-{{ pnl.side|lower }}">{{ pnl.side }}</span></td>
+                            <td><strong>{{ pnl.symbol }}</strong></td>
+                            <td>{{ pnl.size }}</td>
+                            <td><em>{% if pnl.equityUsed is defined and pnl.equityUsed is not none %}${{ "%.2f"|format(pnl.equityUsed) }}{% else %}-{% endif %}</em></td>
+                            <td>${{ "%.2f"|format((pnl.price|float * pnl.size|float)) }}</td>
+                            <td>${{ "%.2f"|format(pnl.price|float) }}</td>
+                            <td>${{ "%.2f"|format(pnl.exitPrice|float) }}</td>
+                            <td><span class="badge badge-{{ pnl.tradeType|lower }}">{{ pnl.tradeType }}</span></td>
+                            <td class="{% if pnl.totalPnl|float >= 0 %}positive{% else %}negative{% endif %}">
+                                ${{ "%.2f"|format(pnl.totalPnl|float) }}
+                            </td>
+                            <td style="font-size: 0.85rem; color: #00d4ff;">
+                                {% if pnl.strategy_name %}{{ pnl.strategy_name }}{% else %}-{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty">No closed positions yet</div>
+                {% endif %}
+            </div>
+            
+            <!-- All Orders Tab -->
+            <div id="all-orders" class="tab-content">
+                {% if fills %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Position Size (USD)</th>
+                            <th>Price</th>
+                            <th>Fee</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for fill in fills %}
+                        <tr>
+                            <td style="font-size: 0.85rem;">{{ fill.createdAtFormatted }}</td>
+                            <td><strong>{{ fill.symbol }}</strong></td>
+                            <td><span class="badge badge-{{ fill.side|lower }}">{{ fill.side }}</span></td>
+                            <td>{{ fill.size }}</td>
+                            <td>${{ "%.2f"|format((fill.price|float * fill.size|float)) }}</td>
+                            <td>${{ "%.2f"|format(fill.price|float) }}</td>
+                            <td>${{ "%.2f"|format(fill.cumMatchFillFee|float) }}</td>
+                            <td>{{ fill.type }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="empty">No trade history</div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <script>
+        // Equity history data from server
+        const equityData = {{ equity_history|tojson }};
+        const symbolUnrealizedHistory = {{ symbol_unrealized_history|tojson }};
+        const symbolRealizedHistory = {{ symbol_realized_history|tojson }};
+        const totalRealizedSeries = {{ total_realized_series|tojson }};
+        
+        let equityChart = null;
+        let symbolChart = null;
+        let currentFilter = 'all';
+        let currentSymbolFilter = 'all';
+        
+        function parseTs(s) {
+            if (!s) return new Date('invalid');
+            // Ensure ISO-8601 for consistent parsing across browsers
+            return new Date(String(s).replace(' ', 'T'));
+        }
+
+        function pad2(n) { return String(n).padStart(2, '0'); }
+        function formatTsLocal(d) {
+            const y = d.getFullYear();
+            const m = pad2(d.getMonth() + 1);
+            const day = pad2(d.getDate());
+            const hh = pad2(d.getHours());
+            const mm = pad2(d.getMinutes());
+            const ss = pad2(d.getSeconds());
+            return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+        }
+
+        function filterChart(evt, range) {
+            currentFilter = range;
+            // Update button states only within Total tab
+            const container = document.getElementById('equity-total');
+            container.querySelectorAll('.time-filter-btn').forEach(btn => btn.classList.remove('active'));
+            if (evt && evt.target) evt.target.classList.add('active');
+            
+            // Filter data based on range
+            const now = new Date();
+            let filteredData = equityData;
+            
+            if (range === '24h') {
+                const cutoff = new Date(now - 24 * 60 * 60 * 1000);
+                filteredData = equityData.filter(d => parseTs(d.timestamp) >= cutoff);
+            } else if (range === '7d') {
+                const cutoff = new Date(now - 7 * 24 * 60 * 60 * 1000);
+                filteredData = equityData.filter(d => parseTs(d.timestamp) >= cutoff);
+            } else if (range === '30d') {
+                const cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
+                filteredData = equityData.filter(d => parseTs(d.timestamp) >= cutoff);
+            }
+            
+            // Update chart
+            updateChart(filteredData);
+        }
+        
+        function updateChart(data) {
+            console.log('updateChart called with data:', data);
+            const labels = data.map(d => d.timestamp);
+            const equityValues = data.map(d => d.total_equity);
+            const pnlValues = data.map(d => d.unrealized_pnl);
+            
+            console.log('Labels:', labels.slice(0, 3));
+            console.log('Equity values:', equityValues.slice(0, 3));
+            console.log('PnL values:', pnlValues.slice(0, 3));
+            
+            // Process data with gap detection (30-minute intervals)
+            const processedEquity = processDataWithGaps(labels, equityValues);
+            const processedPnl = processDataWithGaps(labels, pnlValues);
+            
+            if (equityChart) {
+                console.log('Updating existing chart');
+                equityChart.data.labels = processedEquity.labels;
+                equityChart.data.datasets[0].data = processedEquity.values;
+                equityChart.data.datasets[1].data = processedPnl.values;
+                equityChart.update();
+            } else {
+                console.log('Creating new chart');
+                const ctx = document.getElementById('equityChart').getContext('2d');
+                equityChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: processedEquity.labels,
+                        datasets: [{
+                            label: 'Total Equity',
+                            data: processedEquity.values,
+                            borderColor: '#00d4ff',
+                            backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            spanGaps: false
+                        }, {
+                            label: 'Unrealized PnL',
+                            data: processedPnl.values,
+                            borderColor: '#00ff88',
+                            backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            spanGaps: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: '#e0e0e0'
+                                }
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                backgroundColor: '#151a33',
+                                titleColor: '#00d4ff',
+                                bodyColor: '#e0e0e0',
+                                borderColor: '#1e2645',
+                                borderWidth: 1
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: {
+                                    color: '#1e2645'
+                                },
+                                ticks: {
+                                    color: '#8b92b0',
+                                    maxTicksLimit: 10,
+                                    callback: function(value, index) {
+                                        const label = this.getLabelForValue(value);
+                                        // Extract just the date part (YYYY-MM-DD)
+                                        return label.split(' ')[0];
+                                    }
+                                }
+                            },
+                            y: {
+                                display: true,
+                                grid: {
+                                    color: '#1e2645'
+                                },
+                                ticks: {
+                                    color: '#8b92b0',
+                                    callback: function(value) {
+                                        return '$' + value.toFixed(2);
+                                    }
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+            }
+        }
+
+        function filterSymbolChart(evt, range) {
+            currentSymbolFilter = range;
+            // Update button states within the By Symbol tab only
+            const container = document.getElementById('equity-by-symbol');
+            container.querySelectorAll('.time-filter-btn').forEach(btn => btn.classList.remove('active'));
+            if (evt && evt.target) evt.target.classList.add('active');
+
+            updateSymbolChart();
+        }
+
+        function getFilteredSymbolSeries(series) {
+            const now = new Date();
+            if (currentSymbolFilter === '24h') {
+                const cutoff = new Date(now - 24 * 60 * 60 * 1000);
+                return series.filter(d => parseTs(d.timestamp) >= cutoff);
+            } else if (currentSymbolFilter === '7d') {
+                const cutoff = new Date(now - 7 * 24 * 60 * 60 * 1000);
+                return series.filter(d => parseTs(d.timestamp) >= cutoff);
+            } else if (currentSymbolFilter === '30d') {
+                const cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
+                return series.filter(d => parseTs(d.timestamp) >= cutoff);
+            }
+            return series;
+        }
+
+        function normalizeSeriesToZero(values) {
+            if (!values || values.length === 0) return values;
+            const baseline = values[0];
+            return values.map(v => v - baseline);
+        }
+
+        // removed unused helper insertNullsForGaps; gap logic handled in processDataWithGaps
+
+        function processDataWithGaps(labels, values) {
+            const resultLabels = [];
+            const resultValues = [];
+            
+            for (let i = 0; i < labels.length; i++) {
+                // Add current point
+                resultLabels.push(labels[i]);
+                resultValues.push(values[i]);
+                
+                // Check if we need to insert nulls for missing data
+                if (i < labels.length - 1) {
+                    const currTime = parseTs(labels[i]);
+                    const nextTime = parseTs(labels[i + 1]);
+                    const gapMinutes = (nextTime - currTime) / (1000 * 60); // Convert to minutes
+                    
+                    // If gap > 30 minutes, insert nulls for each missing 30-minute interval
+                    if (gapMinutes > 30) {
+                        const missingIntervals = Math.floor(gapMinutes / 30);
+                        
+                        for (let j = 1; j <= missingIntervals; j++) {
+                            // Calculate timestamp for this missing interval
+                            const missingTime = new Date(currTime.getTime() + (j * 30 * 60 * 1000));
+                            const missingTimestamp = formatTsLocal(missingTime);
+                            
+                            resultLabels.push(missingTimestamp);
+                            resultValues.push(null); // null value breaks the line
+                        }
+                    }
+                }
+            }
+            
+            return { labels: resultLabels, values: resultValues };
+        }
+
+        function extendValuesForGaps(labels, values) {
+            // For PnL, we want to extend the line horizontally across gaps
+            // This means we keep all values as-is, and use spanGaps: true
+            return [...values];
+        }
+
+        function updateSymbolChart() {
+            const select = document.getElementById('symbolSelect');
+            const symbol = select && select.value ? select.value : null;
+            if (symbol === '__ALL_TRADES__') {
+                // Render total realized PnL across all trades, relative to zero
+                const filtered = getFilteredSymbolSeries(totalRealizedSeries);
+                
+                // Check if we have data after filtering
+                if (filtered.length === 0) {
+                    // Show empty chart or message
+                    if (symbolChart) {
+                        symbolChart.data.labels = [];
+                        symbolChart.data.datasets[0].data = [];
+                        symbolChart.data.datasets[0].label = 'All Trades Realized (no data in range)';
+                        symbolChart.update();
+                    }
+                    return;
+                }
+                
+                const labels = filtered.map(d => d.timestamp);
+                const values = filtered.map(d => d.pnl);
+                
+                // Extend to current time with final PnL value (flat line when no trades)
+                const now = new Date();
+                const lastTimestamp = filtered[filtered.length - 1].timestamp;
+                const lastValue = values[values.length - 1];
+                const lastDate = parseTs(lastTimestamp);
+                
+                // Only add anchor if last trade is more than 1 minute old
+                if ((now - lastDate) > 60 * 1000) {
+                    labels.push(formatTsLocal(now));
+                    values.push(lastValue);
+                }
+                
+                const relValues = normalizeSeriesToZero(values);
+                const processedValues = extendValuesForGaps(labels, relValues);
+                if (symbolChart) {
+                    symbolChart.data.labels = labels;
+                    symbolChart.data.datasets[0].data = processedValues;
+                    symbolChart.data.datasets[0].label = 'All Trades Realized (relative)';
+                    symbolChart.update();
+                } else {
+                    const ctx = document.getElementById('symbolPnlChart').getContext('2d');
+                    symbolChart = new Chart(ctx, {
+                        type: 'line',
+                        data: { labels, datasets: [{
+                            label: 'All Trades Realized (relative)',
+                            data: processedValues,
+                            borderColor: '#00ff88',
+                            backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            spanGaps: true
+                        }]},
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: true, labels: { color: '#e0e0e0' } } },
+                            scales: {
+                                x: { display: true, grid: { color: '#1e2645' }, ticks: { color: '#8b92b0', maxTicksLimit: 10, callback(value){ const l=this.getLabelForValue(value); return l.split(' ')[0]; } } },
+                                y: { display: true, grid: { color: '#1e2645' }, ticks: { color: '#8b92b0', callback(v){ const s=v>=0?'+':''; return s+'$'+v.toFixed(2); } } }
+                            },
+                            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                        }
+                    });
+                }
+                return;
+            }
+            const unrealized = (symbol && symbolUnrealizedHistory[symbol]) ? symbolUnrealizedHistory[symbol] : [];
+            const realized = (symbol && symbolRealizedHistory[symbol]) ? symbolRealizedHistory[symbol] : [];
+
+            const filteredUnreal = getFilteredSymbolSeries(unrealized);
+            const filteredReal = getFilteredSymbolSeries(realized);
+
+            // Check if we have any data after filtering
+            if (filteredUnreal.length === 0 && filteredReal.length === 0) {
+                // No data in this range
+                if (symbolChart) {
+                    symbolChart.data.labels = [];
+                    symbolChart.data.datasets[0].data = [];
+                    symbolChart.data.datasets[0].label = symbol + ' (no data in range)';
+                    symbolChart.update();
+                }
+                return;
+            }
+
+            const unrealSorted = filteredUnreal.slice().sort((a,b)=>parseTs(a.timestamp)-parseTs(b.timestamp));
+            const realSorted = filteredReal.slice().sort((a,b)=>parseTs(a.timestamp)-parseTs(b.timestamp));
+            const uMap = new Map(unrealSorted.map(d=>[d.timestamp, d.pnl]));
+
+            // Determine range start/end for anchors
+            const now = new Date();
+            let rangeStart = null;
+            let rangeEnd = null;
+            if (currentSymbolFilter === '24h') {
+                rangeStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                rangeEnd = now;
+            } else if (currentSymbolFilter === '7d') {
+                rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                rangeEnd = now;
+            } else if (currentSymbolFilter === '30d') {
+                rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                rangeEnd = now;
+            } else {
+                const times = [
+                    ...unrealSorted.map(d => parseTs(d.timestamp)),
+                    ...realSorted.map(d => parseTs(d.timestamp))
+                ].filter(d => !isNaN(d));
+                if (times.length > 0) {
+                    times.sort((a,b) => a - b);
+                    // Start a little before the first event so the chart shows a flat line from 0
+                    rangeStart = new Date(times[0].getTime() - 60 * 1000);
+                    // End at current time to show flat line when no recent trades
+                    rangeEnd = now;
+                } else {
+                    rangeStart = now;
+                    rangeEnd = now;
+                }
+            }
+
+            // Build merged timeline of event timestamps
+            const eventTsSet = new Set([
+                ...unrealSorted.map(d => d.timestamp),
+                ...realSorted.map(d => d.timestamp)
+            ]);
+            const eventTs = Array.from(eventTsSet).sort((a,b)=>parseTs(a)-parseTs(b));
+
+            // Compose combined series = realized_cumulative + unrealized_when_open
+            const labels = [];
+            const combined = [];
+
+            // Anchor at start
+            labels.push(formatTsLocal(rangeStart));
+            combined.push(0); // relative view will normalize; start as 0
+
+            let rIdx = 0;
+            let currentReal = 0;
+            for (const ts of eventTs) {
+                const tDate = parseTs(ts);
+                // advance realized pointer up to this timestamp
+                while (rIdx < realSorted.length && parseTs(realSorted[rIdx].timestamp) <= tDate) {
+                    currentReal = realSorted[rIdx].pnl || 0;
+                    rIdx++;
+                }
+                const uVal = uMap.has(ts) ? (uMap.get(ts) || 0) : null;
+                const value = (uVal !== null && uVal !== undefined) ? (currentReal + uVal) : currentReal;
+                labels.push(ts);
+                combined.push(value);
+            }
+
+            // Anchor at end
+            labels.push(formatTsLocal(rangeEnd));
+            combined.push(currentReal);
+
+            // Normalize to start at 0
+            const relValues = normalizeSeriesToZero(combined);
+            const processedValues = extendValuesForGaps(labels, relValues);
+
+            if (symbolChart) {
+                symbolChart.data.labels = labels;
+                symbolChart.data.datasets[0].data = processedValues;
+                symbolChart.update();
+            } else {
+                const ctx = document.getElementById('symbolPnlChart').getContext('2d');
+                symbolChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'PnL (relative)',
+                            data: processedValues,
+                            borderColor: '#00ff88',
+                            backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            // Use straight segments between points (slope when changing, flat when repeated)
+                            tension: 0,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            spanGaps: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: { color: '#e0e0e0' }
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                backgroundColor: '#151a33',
+                                titleColor: '#00d4ff',
+                                bodyColor: '#e0e0e0',
+                                borderColor: '#1e2645',
+                                borderWidth: 1,
+                                callbacks: {
+                                    label: function(ctx) {
+                                        const v = ctx.parsed.y || 0;
+                                        const sign = v >= 0 ? '+' : '';
+                                        return sign + '$' + v.toFixed(2);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: { color: '#1e2645' },
+                                ticks: {
+                                    color: '#8b92b0',
+                                    maxTicksLimit: 10,
+                                    callback: function(value) {
+                                        const label = this.getLabelForValue(value);
+                                        return label.split(' ')[0];
+                                    }
+                                }
+                            },
+                            y: {
+                                display: true,
+                                grid: { color: '#1e2645' },
+                                ticks: {
+                                    color: '#8b92b0',
+                                    callback: function(value) {
+                                        const sign = value >= 0 ? '+' : '';
+                                        return sign + '$' + value.toFixed(2);
+                                    }
+                                }
+                            }
+                        },
+                        interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                    }
+                });
+            }
+        }
+        
+        // Initialize charts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, equityData:', equityData ? equityData.length : 'undefined');
+            console.log('Chart.js available:', typeof Chart !== 'undefined');
+            console.log('Canvas element:', document.getElementById('equityChart'));
+            
+            try {
+                if (equityData && equityData.length > 0) {
+                    console.log('Calling updateChart with data length:', equityData.length);
+                    updateChart(equityData);
+                } else {
+                    console.log('No equity data available - equityData:', equityData);
+                }
+                // Populate symbol select default and render if data exists
+                const select = document.getElementById('symbolSelect');
+                if (select && select.options.length > 0) {
+                    updateSymbolChart();
+                    select.addEventListener('change', function() {
+                        updateSymbolChart();
+                    });
+                }
+            } catch (error) {
+                console.error('Error initializing charts:', error);
+                console.error('Error stack:', error.stack);
+            }
+        });
+        
+        function switchTab(event, tabId) {
+            // Scope tab switching to the current section (Trade History)
+            const container = event.currentTarget.closest('.section');
+            if (!container) return;
+
+            const tabContents = container.querySelectorAll('.tab-content');
+            tabContents.forEach(content => content.classList.remove('active'));
+            
+            const tabs = container.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+            
+            const target = container.querySelector('#' + tabId);
+            if (target) target.classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+        function switchEquityTab(event, tabId) {
+            const container = event.currentTarget.closest('.section');
+            const tabContents = container.querySelectorAll('.tab-content');
+            tabContents.forEach(content => content.classList.remove('active'));
+
+            const tabs = container.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+
+            container.querySelector('#' + tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+        
+        function switchWallet() {
+            const walletId = document.getElementById('walletSelect').value;
+            if (walletId) {
+                window.location.href = `/wallet/${walletId}`;
+            }
+        }
+        </script>
+
+{% endblock %}
