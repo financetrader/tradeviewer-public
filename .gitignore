@@ -71,3 +71,7 @@ LEVERAGE_CLEANUP_PLAN.md
 DOCUMENTATION_REVIEW.md
 DEPLOYMENT_README.md
 
+# Local configuration files
+.cursorrules
+.cursorignore
+
