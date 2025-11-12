@@ -46,6 +46,9 @@ docs/archive/
 # Session notes (local development, not for commit)
 docs/session-notes/
 
+# Historical SQL migrations (should be in docs/archive/migrations/)
+migrations/
+
 # IDE
 .vscode/
 .idea/
