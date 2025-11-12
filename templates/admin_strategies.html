@@ -324,7 +324,7 @@
         </div>
 
         <div style="overflow-x: auto;">
-            <table style="margin-top:0px; min-width: 100%;">
+            <table style="margin-top:0px; min-width: 100%;" id="strategyMatrixTable">
                 <thead>
                     <tr>
                         <th style="position: sticky; left: 0; background:#1a1f3a; z-index: 2; cursor: pointer; user-select: none;" onclick="toggleSort('wallet')">Wallet <span class="sort-indicator" data-column="wallet">↕</span></th>
@@ -336,7 +336,7 @@
                         <th style="width: 200px;">Action</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="strategyMatrixTableBody">
                     {% for row in matrix_data %}
                         {% if row.symbols|length > 0 %}
                             {% for symbol_data in row.symbols %}
@@ -694,8 +694,8 @@
         function sortTable() {
             if (!currentSort.column) return;
 
-            const rows = Array.from(document.querySelectorAll('tbody tr.pair-row'));
-            const tbody = document.querySelector('tbody');
+            const rows = Array.from(document.querySelectorAll('#strategyMatrixTableBody tr.pair-row'));
+            const tbody = document.getElementById('strategyMatrixTableBody');
 
             // Store visibility state before sorting
             const visibilityMap = new Map();
