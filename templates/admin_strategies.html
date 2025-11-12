@@ -371,42 +371,201 @@
         </div>
         {% endif %}
 
-        <!-- Manual Pair Addition -->
+        <!-- Manual Pair Addition - Multi Row -->
         <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #1e2645;">
-            <h3 style="color:#00d4ff; font-size: 1.1rem; margin-bottom: 12px;">Add Symbol Manually</h3>
-            <form method="POST" action="{{ url_for('admin_assign_strategy') }}">
+            <h3 style="color:#00d4ff; font-size: 1.1rem; margin-bottom: 12px;">Add Symbols & Strategies</h3>
+            <form method="POST" action="{{ url_for('admin_assign_strategy') }}" id="multiPairForm">
                 {% if config.WTF_CSRF_ENABLED %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>{% endif %}
-                <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-                    <div class="card">
-                        <label>Wallet</label>
-                        <select name="wallet_id" required>
-                            {% for w in wallets %}
-                              <option value="{{ w.id }}">{{ w.name }}{% if w.equity %} — ${{ "{:,.2f}".format(w.equity) }}{% endif %}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="card">
-                        <label>Symbol / Pair</label>
-                        <input type="text" name="symbol" placeholder="e.g., BTC-USDT" required>
-                    </div>
-                    <div class="card">
-                        <label>Strategy</label>
-                        <select name="strategy_id" required>
-                            {% for s in strategies %}
-                              <option value="{{ s.id }}">{{ s.name }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="card">
-                        <label>Notes (optional)</label>
-                        <input type="text" name="notes" placeholder="e.g., Traded by mistake, Testing">
+
+                <!-- Step 1: Select Wallet -->
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: #8b92b0; font-weight: 600;">SELECT WALLET</label>
+                    <select id="walletSelect" onchange="updateWalletInfo()" style="width: 100%; max-width: 500px; padding: 10px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff;">
+                        <option value="">-- Choose a wallet --</option>
+                        {% for w in wallets %}
+                          <option value="{{ w.id }}" data-equity="{{ w.equity or 0 }}" data-name="{{ w.name }}">{{ w.name }}{% if w.equity %} — ${{ "{:,.2f}".format(w.equity) }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <div id="walletInfo" style="margin-top: 10px; padding: 10px; background: #1a1f3a; border-radius: 4px; display: none; color: #00d4ff; font-weight: 600;">
+                        Selected Wallet Value: <span id="walletValueDisplay">$0.00</span>
                     </div>
                 </div>
-                <div style="margin-top:12px;">
-                    <button class="btn btn-primary" type="submit">Add & Assign Strategy</button>
+
+                <!-- Hidden input for wallet_id (submitted with form) -->
+                <input type="hidden" id="walletIdInput" name="wallet_id">
+
+                <!-- Step 2: Add Pairs -->
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 12px; color: #8b92b0; font-weight: 600;">ADD SYMBOL/STRATEGY PAIRS (Add as many as you want)</label>
+
+                    <div style="border: 1px solid #252b4a; border-radius: 4px; overflow: hidden;">
+                        <!-- Header Row -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 120px auto; gap: 10px; padding: 12px; background: #1a1f3a; border-bottom: 1px solid #252b4a; font-weight: 600; color: #8b92b0; font-size: 0.9rem;">
+                            <div>Symbol / Pair</div>
+                            <div>Strategy</div>
+                            <div>Notes</div>
+                            <div></div>
+                        </div>
+
+                        <!-- Pair Rows -->
+                        <div id="pairRowsContainer" style="max-height: 400px; overflow-y: auto;">
+                            <!-- Rows will be added here by JavaScript -->
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn" style="margin-top: 12px; padding: 8px 16px; background: #252b4a; color: #00d4ff; border: 1px solid #252b4a; border-radius: 4px; cursor: pointer; font-weight: 600;" onclick="addPairRow()">
+                        + Add Another Pair
+                    </button>
+                </div>
+
+                <!-- Submit Button -->
+                <div style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
+                        Assign All to Wallet
+                    </button>
                 </div>
             </form>
         </div>
+
+        <script>
+        // Store strategies in JSON for use in JavaScript
+        const strategiesData = [
+            {% for s in strategies %}
+            { id: {{ s.id }}, name: "{{ s.name|replace('"', '\\"') }}" }{{ "," if not loop.last else "" }}
+            {% endfor %}
+        ];
+
+        let pairRowCount = 0;
+        let symbolSuggestionsCache = [];
+
+        // Fetch symbol suggestions from backend
+        async function fetchSymbolSuggestions() {
+            try {
+                const response = await fetch('/api/symbol-suggestions');
+                const data = await response.json();
+                symbolSuggestionsCache = data.symbols || [];
+            } catch (e) {
+                console.error('Error fetching symbol suggestions:', e);
+                symbolSuggestionsCache = [];
+            }
+        }
+
+        function addPairRow(symbol = '', strategyId = '', notes = '') {
+            const container = document.getElementById('pairRowsContainer');
+            const rowId = `pair-row-${pairRowCount++}`;
+
+            const row = document.createElement('div');
+            row.id = rowId;
+            row.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr 120px auto; gap: 10px; padding: 10px; border-bottom: 1px solid #252b4a; align-items: center;';
+
+            const strategyOptions = strategiesData.map(s => `<option value="${s.id}" ${s.id == strategyId ? 'selected' : ''}>${s.name}</option>`).join('');
+
+            // Create datalist for symbol suggestions
+            const datalistId = `symbols-list-${rowId}`;
+            const datalistHTML = `<datalist id="${datalistId}">
+                ${symbolSuggestionsCache.map(s => `<option value="${s}">`).join('')}
+            </datalist>`;
+
+            row.innerHTML = `
+                <div style="position: relative;">
+                    <input type="text" class="pair-symbol" name="symbols" list="${datalistId}" placeholder="e.g., BTC-USDT" value="${symbol}" style="padding: 8px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; width: 100%;">
+                    ${datalistHTML}
+                </div>
+                <select class="pair-strategy" name="strategy_ids" style="padding: 8px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff;">
+                    <option value="">Select...</option>
+                    ${strategyOptions}
+                </select>
+                <input type="text" class="pair-notes" name="notes_list" placeholder="Testing" value="${notes}" style="padding: 8px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.9rem;">
+                <button type="button" style="padding: 6px 12px; background: #ff4757; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" onclick="removePairRow('${rowId}')">Remove</button>
+            `;
+
+            container.appendChild(row);
+            updateSubmitButton();
+        }
+
+        function removePairRow(rowId) {
+            const row = document.getElementById(rowId);
+            if (row) {
+                row.remove();
+                updateSubmitButton();
+            }
+        }
+
+        function updateWalletInfo() {
+            const select = document.getElementById('walletSelect');
+            const walletIdInput = document.getElementById('walletIdInput');
+            const walletInfo = document.getElementById('walletInfo');
+            const walletValueDisplay = document.getElementById('walletValueDisplay');
+
+            if (select.value) {
+                const selectedOption = select.options[select.selectedIndex];
+                const equity = parseFloat(selectedOption.dataset.equity) || 0;
+                walletIdInput.value = select.value;
+                walletValueDisplay.textContent = '$' + equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                walletInfo.style.display = 'block';
+
+                // Enable submit button if wallet is selected
+                updateSubmitButton();
+            } else {
+                walletIdInput.value = '';
+                walletInfo.style.display = 'none';
+                updateSubmitButton();
+            }
+        }
+
+        function updateSubmitButton() {
+            const submitBtn = document.getElementById('submitBtn');
+            const walletId = document.getElementById('walletIdInput').value;
+            const pairRows = document.querySelectorAll('#pairRowsContainer > div').length;
+
+            submitBtn.disabled = !walletId || pairRows === 0;
+        }
+
+        function prepareFormSubmit(e) {
+            const walletId = document.getElementById('walletIdInput').value;
+            if (!walletId) {
+                e.preventDefault();
+                alert('Please select a wallet');
+                return false;
+            }
+
+            const pairRows = document.querySelectorAll('#pairRowsContainer > div');
+            if (pairRows.length === 0) {
+                e.preventDefault();
+                alert('Please add at least one symbol/strategy pair');
+                return false;
+            }
+
+            // Validate that all rows have symbol and strategy
+            for (let row of pairRows) {
+                const symbol = row.querySelector('.pair-symbol').value.trim();
+                const strategy = row.querySelector('.pair-strategy').value;
+
+                if (!symbol) {
+                    e.preventDefault();
+                    alert('All symbols are required');
+                    return false;
+                }
+                if (!strategy) {
+                    e.preventDefault();
+                    alert('All strategies are required');
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // Set up form submission
+        document.getElementById('multiPairForm').addEventListener('submit', prepareFormSubmit);
+
+        // Add one empty pair row on page load and fetch symbol suggestions
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchSymbolSuggestions().then(() => {
+                addPairRow();
+            });
+        });
+        </script>
     </div>
 
     <!-- Assignment Modal -->
