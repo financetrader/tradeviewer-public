@@ -292,6 +292,7 @@ Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 - **Position opened date**: Don't use first-ever position snapshot. Find most recent zero-size → non-zero transition for accurate "time in trade".
 - **Portfolio equity aggregation**: DO NOT filter wallets based on staleness (e.g., no update in 1 hour). This causes artificial dips in equity charts. Wallets are the source of truth - aggregate ALL connected wallets' latest snapshots, no matter the age. Show staleness warnings in UI instead (see `db/queries.py:get_equity_history()`).
 - **Form array submission in Flask**: Use `request.form.getlist('fieldname')` to get HTML form arrays (when `<input name="symbol">` appears multiple times). Check for getlist() first, then fall back to get() for backwards compatibility with single-value forms. In templates, form fields with `name="symbols"` submit as array, not single string.
+- **Table filtering with data attributes**: Use `data-*` attributes on table rows for client-side filtering/sorting. Get filter/sort values from data attributes, not from displayed cell text. This allows filtering by different values than what's displayed (e.g., numeric trade count instead of text). Always use `.toLowerCase()` for case-insensitive string comparisons. See `templates/admin_strategies.html` for example implementation.
 
 ## 7. Use Feature Flags for Experimental Code
 Toggle new features on/off without rebuilding. Makes rolling back instant when something breaks.
