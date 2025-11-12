@@ -284,7 +284,8 @@ except OperationalError as e:
 **CRITICAL**: Session notes and documentation in this repo should NOT contain personal/server-specific information.
 
 **Rules:**
-- **NEVER commit server IPs** to git (e.g., 91.99.142.197:5000)
+- **NEVER commit server IPs** to git in regular documentation (README.md, GUIDE.md, session notes, etc.)
+- **EXCEPTION**: CLAUDE.md is allowed to contain the actual server IP (`91.99.142.197:5000`) because it's specifically for Claude AI testing instructions
 - **Session notes go in `docs/session-notes/`** and are gitignored (local only)
 - **Generic placeholders** in examples: `http://localhost:5000`, `<server-ip>:5000`, `your-domain.com`
 - **Never include**: Personal credentials, API keys, server passwords, specific user data
@@ -301,6 +302,7 @@ except OperationalError as e:
 - ✅ `README.md` - No personal setup (uses examples)
 - ✅ `docs/GUIDE.md` - No personal setup (uses localhost)
 - ✅ `docs/FRESH_SERVER_INSTALLATION.md` - No personal setup (uses placeholders)
+- ✅ `CLAUDE.md` - Contains server IP (intentional, for Claude AI testing)
 - ⚠️ `docs/session-notes/` - Added to .gitignore (not pushed to GitHub)
 
 ## 7. Document Platform Gotchas Immediately
@@ -316,10 +318,10 @@ Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 - **Portfolio equity aggregation**: DO NOT filter wallets based on staleness (e.g., no update in 1 hour). This causes artificial dips in equity charts. Wallets are the source of truth - aggregate ALL connected wallets' latest snapshots, no matter the age. Show staleness warnings in UI instead (see `db/queries.py:get_equity_history()`).
 - **Form array submission in Flask**: Use `request.form.getlist('fieldname')` to get HTML form arrays (when `<input name="symbol">` appears multiple times). Check for getlist() first, then fall back to get() for backwards compatibility with single-value forms. In templates, form fields with `name="symbols"` submit as array, not single string.
 - **Table filtering with data attributes**: Use `data-*` attributes on table rows for client-side filtering/sorting. Get filter/sort values from data attributes, not from displayed cell text. This allows filtering by different values than what's displayed (e.g., numeric trade count instead of text). Always use `.toLowerCase()` for case-insensitive string comparisons. See `templates/admin_strategies.html` for example implementation.
-- **Leverage calculation**: Calculated using margin delta tracking at position OPEN time (stored in position_snapshots). When trades close, leverage is looked up from position_snapshots. Both Apex Omni and Hyperliquid use margin delta method for new positions. Old trades (Aug-Nov 7) have no leverage (logger not running then). See `docs/LEVERAGE_CALCULATION.md` for complete implementation, exchange-specific algorithms, and verification steps.
+- **Leverage calculation**: Calculated using margin delta tracking at position OPEN time (stored in position_snapshots). When trades close, leverage is looked up from position_snapshots. Both Apex Omni and Hyperliquid use margin delta method for new positions. Old trades (Aug-Nov 7) have no leverage (logger not running then). See `docs/leverage/LEVERAGE_CALCULATION.md` for complete implementation, exchange-specific algorithms, and verification steps.
 - **Aggregated trades**: Exchange APIs return individual fills. System groups fills by (wallet_id, timestamp, symbol) into logical trades. Uses `aggregated_trades` table. UI shows aggregated view; raw fills still in `closed_trades`. 148 fills grouped into 29 logical trades.
 
-## 7. Use Feature Flags for Experimental Code
+## 8. Use Feature Flags for Experimental Code
 Toggle new features on/off without rebuilding. Makes rolling back instant when something breaks.
 
 **Pattern:**
@@ -339,7 +341,7 @@ else:
 - A/B test new features
 - Gradual rollout to production
 
-## 8. Always Request Debug Logging
+## 9. Always Request Debug Logging
 Ask Claude Code to add `app.logger.info()` statements for complex flows. Future you will thank past you when debugging async API calls or position calculations.
 
 **Critical areas needing logging:**
@@ -354,7 +356,7 @@ Ask Claude Code to add `app.logger.info()` statements for complex flows. Future 
 app.logger.info(f"Calculating leverage for {symbol}: position_size={position_size_usd}, margin_used={margin_used}")
 ```
 
-## 9. Test After Every Change!!
+## 10. Test After Every Change!!
 **CRITICAL**: Verify changes work before claiming success.
 
 **IMPORTANT**: Always test against the actual running server, not localhost. Test URL: **http://91.99.142.197:5000/**
@@ -370,7 +372,7 @@ app.logger.info(f"Calculating leverage for {symbol}: position_size={position_siz
 
 **Never assume changes worked without verification.**
 
-## 10. Keep Conversations Focused on Single Components
+## 11. Keep Conversations Focused on Single Components
 Don't ask to "refactor the whole app". Smaller scope = better results.
 
 **Good scopes:**
@@ -383,7 +385,7 @@ Don't ask to "refactor the whole app". Smaller scope = better results.
 - "Improve the entire dashboard"
 - "Optimize everything"
 
-## 11. Database Session Management Rules
+## 12. Database Session Management Rules
 **CRITICAL**: SQLAlchemy session handling is easy to break.
 
 **Rules:**
@@ -408,7 +410,7 @@ with get_session() as session:
 # Session automatically cleaned up
 ```
 
-## 12. Background Thread Safety
+## 13. Background Thread Safety
 Background logger runs in a daemon thread. Be careful with shared state.
 
 **Rules:**
@@ -423,7 +425,7 @@ if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
     start_background_logger()  # Only start once, not on reloader
 ```
 
-## 13. Exchange API Rate Limiting
+## 14. Exchange API Rate Limiting
 Exchange APIs have rate limits. Don't hammer them.
 
 **Rules:**
@@ -442,7 +444,7 @@ except RateLimitError:
     # Retry or return cached data
 ```
 
-## 14. Symbol Normalization Consistency
+## 15. Symbol Normalization Consistency
 Different exchanges use different symbol formats. Always normalize.
 
 **Rules:**
@@ -461,7 +463,7 @@ normalized = normalize_symbol(symbol)
 if normalized == normalize_symbol('BTC-USDT'):
 ```
 
-## 15. Encryption Key Management
+## 16. Encryption Key Management
 Changing encryption keys breaks existing credentials.
 
 **Rules:**
@@ -475,7 +477,7 @@ Changing encryption keys breaks existing credentials.
 2. Notify users to re-enter credentials
 3. Or: Write migration script to re-encrypt with new key
 
-## 16. Position Calculation Edge Cases
+## 17. Position Calculation Edge Cases
 Position calculations have many edge cases. Handle them explicitly.
 
 **Known edge cases:**
@@ -489,7 +491,7 @@ Position calculations have many edge cases. Handle them explicitly.
 - Provide fallback when calculation fails
 - Document assumptions in code comments
 
-## 17. CSRF Protection Gotchas
+## 18. CSRF Protection Gotchas
 CSRF tokens are required for all POST requests.
 
 **Rules:**
