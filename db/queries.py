@@ -91,8 +91,29 @@ class ClosedTradeDataDict(TypedDict):
     exit_type: Optional[str]
     equity_used: Optional[float]
     leverage: Optional[float]
+def is_wallet_stale(last_update_timestamp: datetime, stale_hours: int = 2) -> bool:
+    """
+    Check if a wallet's last update is older than the staleness threshold.
 
+    Args:
+        last_update_timestamp: The timestamp of the wallet's last update
+        stale_hours: Threshold in hours (default: 2 hours). If wallet hasn't updated in longer than this, it's stale.
 
+    Returns:
+        bool: True if wallet hasn't updated in >stale_hours, False otherwise
+
+    Note:
+        Used by the UI to show staleness warnings to users. This function does NOT filter data
+        from queries - it's only for display purposes. See CLAUDE.md rule 6.
+    """
+    if last_update_timestamp is None:
+        return True
+
+    now = datetime.now()
+    age_seconds = (now - last_update_timestamp).total_seconds()
+    stale_seconds = stale_hours * 3600
+
+    return age_seconds > stale_seconds
 
 
 def get_equity_history(session: Session, wallet_id: Optional[int] = None, hours: Optional[int] = None) -> List[EquityHistoryDict]:
@@ -169,7 +190,8 @@ def get_equity_history(session: Session, wallet_id: Optional[int] = None, hours:
             all_wallet_ids.add(wallet_key)
 
         # For each timestamp, calculate portfolio total using latest data for each wallet
-        # Only include wallets that have data within the last hour to avoid stale data
+        # NOTE: Wallets are the source of truth. Aggregate ALL connected wallets' latest snapshots,
+        # regardless of age. Staleness is shown in the UI, not filtered here. See CLAUDE.md rule 6.
         results = []
         latest_per_wallet = {}  # wallet_id -> (timestamp, equity_data)
 
@@ -178,21 +200,19 @@ def get_equity_history(session: Session, wallet_id: Optional[int] = None, hours:
             for wallet_id, data in timestamp_data[ts_key].items():
                 latest_per_wallet[wallet_id] = (ts_key, data)
 
-            # Sum across all wallets using their latest data, filtering out stale data (>1 hour old)
-            current_ts = datetime.strptime(ts_key, "%Y-%m-%d %H:%M")
+            # Sum across ALL wallets using their latest data (no staleness filtering)
             portfolio_total = 0
             portfolio_unrealized = 0
             portfolio_available = 0
             portfolio_realized = 0
 
             for wallet_id, (ts_str, data) in latest_per_wallet.items():
-                wallet_ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M")
-                # Only include wallet data if it's within 1 hour of current timestamp
-                if (current_ts - wallet_ts).total_seconds() <= 3600:
-                    portfolio_total += data['total_equity']
-                    portfolio_unrealized += data['unrealized_pnl']
-                    portfolio_available += data['available_balance']
-                    portfolio_realized += data['realized_pnl']
+                # Include ALL wallet data, regardless of age
+                # Staleness is indicated to users via UI warnings, not by filtering data
+                portfolio_total += data['total_equity']
+                portfolio_unrealized += data['unrealized_pnl']
+                portfolio_available += data['available_balance']
+                portfolio_realized += data['realized_pnl']
 
             results.append({
                 'timestamp': ts_key,
