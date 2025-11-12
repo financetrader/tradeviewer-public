@@ -1270,6 +1270,9 @@ def admin_strategies():
         assignments = list_assignments(session)
         wallets = session.query(WalletConfig).filter(WalletConfig.status == 'connected').order_by(WalletConfig.name).all()
 
+        # Get latest equity per wallet
+        portfolio_equity = get_latest_equity_per_wallet(session)
+
         # Serialize to plain dicts to avoid lazy loading after session close
         strategies_data = [{
             'id': s.id,
@@ -1296,6 +1299,7 @@ def admin_strategies():
             'id': w.id,
             'name': w.name,
             'provider': w.provider,
+            'equity': portfolio_equity.get(w.id, 0)
         } for w in wallets]
 
         # Get traded symbols per wallet
@@ -1347,6 +1351,7 @@ def admin_strategies():
             row = {
                 'wallet_id': w.id,
                 'wallet_name': w.name,
+                'equity': portfolio_equity.get(w.id, 0),
                 'symbols': []
             }
             for symbol in wallet_symbols:

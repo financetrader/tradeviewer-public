@@ -282,6 +282,7 @@
                 <thead>
                     <tr>
                         <th style="position: sticky; left: 0; background:#1a1f3a; z-index: 2;">Wallet</th>
+                        <th style="width: 120px;">Value</th>
                         <th style="min-width: 200px;">Symbol / Notes</th>
                         <th>Strategy</th>
                         <th style="width: 120px;">Trades</th>
@@ -296,6 +297,15 @@
                             <tr class="pair-row {{ 'inactive-pair' if not symbol_data.is_current else '' }}" data-is-current="{{ symbol_data.is_current|lower }}">
                                 <td style="position: sticky; left: 0; background:#1a1f3a; font-weight: 600;">
                                     {{ row.wallet_name }}
+                                </td>
+                                <td>
+                                    {% if row.equity %}
+                                        <span style="color: #00d4ff; font-weight: 600;">
+                                            ${{ "{:,.2f}".format(row.equity) }}
+                                        </span>
+                                    {% else %}
+                                        <span style="color: #8b92b0; font-style: italic;">-</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <div style="font-weight: 600;">{{ symbol_data.symbol }}</div>
@@ -343,7 +353,16 @@
                         {% else %}
                             <tr>
                                 <td style="position: sticky; left: 0; background:#1a1f3a; font-weight: 600;">{{ row.wallet_name }}</td>
-                                <td colspan="3" style="color:#8b92b0;">No traded symbols yet</td>
+                                <td>
+                                    {% if row.equity %}
+                                        <span style="color: #00d4ff; font-weight: 600;">
+                                            ${{ "{:,.2f}".format(row.equity) }}
+                                        </span>
+                                    {% else %}
+                                        <span style="color: #8b92b0; font-style: italic;">-</span>
+                                    {% endif %}
+                                </td>
+                                <td colspan="4" style="color:#8b92b0;">No traded symbols yet</td>
                             </tr>
                         {% endif %}
                     {% endfor %}
@@ -362,7 +381,7 @@
                         <label>Wallet</label>
                         <select name="wallet_id" required>
                             {% for w in wallets %}
-                              <option value="{{ w.id }}">{{ w.name }}</option>
+                              <option value="{{ w.id }}">{{ w.name }}{% if w.equity %} — ${{ "{:,.2f}".format(w.equity) }}{% endif %}</option>
                             {% endfor %}
                         </select>
                     </div>
