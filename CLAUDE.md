@@ -57,38 +57,59 @@ sqlite3 data/wallet_backup_YYYYMMDD_HHMMSS.db "PRAGMA integrity_check;"
 ls -lh data/wallet.db data/wallet_backup_*.db
 ```
 
-## 3. Always Branch Before Upgrades or Major Changes
-**CRITICAL**: Never make upgrades or major changes directly on `main` branch.
+## 3. Always Create a Branch for Every Change
+**CRITICAL**: ALWAYS create a branch before making ANY changes. Branch off the CURRENT branch (not necessarily main).
 
-**Git Workflow:**
+**Git Workflow (CRITICAL ORDER: Code → Test → Document → Merge):**
 ```bash
 # 1. Check current branch and status
 git status
-git branch
+git branch  # Note which branch you're currently on
 
-# 2. Create feature branch from main
-git checkout main
-git pull origin main  # If using remote
-git checkout -b feature/upgrade-dependencies
+# 2. Create feature branch from CURRENT branch
+# Branch off whatever branch you're currently on
+git checkout -b feature/add-wallet-validation
 # OR
 git checkout -b fix/position-calculation-bug
 # OR
 git checkout -b upgrade/flask-3.2.0
+# OR
+git checkout -b docs/update-readme
 
-# 3. Make changes, test thoroughly
-# ... make changes ...
-python app.py  # Test locally
+# 3. STEP 1: Make code changes
+# ... write code ...
 
-# 4. Commit changes
-git add .
-git commit -m "Description of changes"
-
-# 5. Test again after commit
+# 4. STEP 2: TEST FIRST - Verify everything works completely
 python app.py
+curl http://localhost:5000/health
+# Test actual functionality:
+# - Test routes/endpoints
+# - Verify database writes
+# - Check logs for errors
+# - Test edge cases
+# DO NOT proceed to documentation until testing is confirmed
 
-# 6. Merge back to main (only after testing)
+# 5. Commit code changes (after testing passes)
+git add .
+git commit -m "Add feature: description of changes"
+
+# 6. STEP 3: DOCUMENT AFTER TESTING CONFIRMED
+# Only add documentation after testing is verified
+# Add docstrings to new functions/classes
+# Update docs/GUIDE.md for API/config changes
+# Update README.md for user-facing features
+# Create session notes if major changes
+git add .
+git commit -m "docs: Add documentation for feature"
+
+# 7. STEP 4: Merge ONLY after documentation complete
+# If you branched off main:
 git checkout main
-git merge feature/upgrade-dependencies
+git merge feature/add-wallet-validation
+
+# If you branched off another feature branch:
+git checkout <parent-branch-name>
+git merge feature/add-wallet-validation
 ```
 
 **Branch Naming Conventions:**
@@ -99,15 +120,45 @@ git merge feature/upgrade-dependencies
 - `docs/` - Documentation updates
 
 **Rules:**
-- **Always branch** before: dependency upgrades, schema changes, major refactors
-- **Test on branch** before merging to main
-- **Never commit directly to main** for upgrades
+- **ALWAYS branch** before making ANY changes (features, fixes, upgrades, refactors, docs)
+- **Branch off current branch**: Don't assume you need to go back to main
+- **Workflow order is CRITICAL**: Code → Test → Document → Merge
+- **Test FIRST**: Verify all changes work completely before documenting
+- **Document AFTER testing**: Only add documentation after testing is confirmed
+- **Merge LAST**: Only merge after documentation is complete
+- **Never commit directly** to any branch without creating a new branch first
 - **Document changes** in commit messages
 
-**Exception**: Only commit directly to main for trivial changes (typos, formatting) with explicit approval.
+**Exception**: Only commit directly to a branch for trivial changes (typos, formatting) with explicit approval from project owner.
 
-## 4. Document Everything
-**CRITICAL**: Code without documentation is technical debt. Document as you go.
+**Why This Order?**
+- Testing first ensures code actually works before documenting
+- Documentation reflects working code, not broken assumptions
+- Prevents merging broken or undocumented code
+- Cleaner git history with separate commits for code and docs
+
+**Why Branch Off Current Branch?**
+- If you're already on a feature branch, branch off that
+- Keeps work organized and allows nested feature branches
+- Easier to track related changes
+- Can merge back to parent when ready
+
+## 4. Test First, Document After, Then Merge
+**CRITICAL**: Follow this exact order: Code → Test → Document → Merge
+
+**Workflow Order:**
+1. **Code**: Make changes on branch
+2. **Test**: Verify changes work completely (see Testing section below)
+3. **Document**: Only AFTER testing is confirmed, add documentation
+4. **Merge**: Only merge after documentation is complete
+
+**Why This Order?**
+- Testing first ensures code actually works before documenting
+- Documentation reflects working code, not broken assumptions
+- Prevents merging broken or undocumented code
+- Cleaner git history with separate commits for code and docs
+
+**Documentation (AFTER testing confirmed):**
 
 **Documentation Locations:**
 - **Code changes**: Add docstrings to new functions/classes
@@ -240,6 +291,7 @@ Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 - **Symbol normalization**: Always normalize symbols before DB operations (`normalize_symbol()`). Different exchanges use different formats (BTC vs BTC-USDT).
 - **Position opened date**: Don't use first-ever position snapshot. Find most recent zero-size → non-zero transition for accurate "time in trade".
 - **Portfolio equity aggregation**: DO NOT filter wallets based on staleness (e.g., no update in 1 hour). This causes artificial dips in equity charts. Wallets are the source of truth - aggregate ALL connected wallets' latest snapshots, no matter the age. Show staleness warnings in UI instead (see `db/queries.py:get_equity_history()`).
+- **Form array submission in Flask**: Use `request.form.getlist('fieldname')` to get HTML form arrays (when `<input name="symbol">` appears multiple times). Check for getlist() first, then fall back to get() for backwards compatibility with single-value forms. In templates, form fields with `name="symbols"` submit as array, not single string.
 
 ## 7. Use Feature Flags for Experimental Code
 Toggle new features on/off without rebuilding. Makes rolling back instant when something breaks.
@@ -456,13 +508,33 @@ ls -lh data/wallet_backup_*.db  # Verify backup
 sqlite3 data/wallet.db "SELECT COUNT(*) FROM equity_snapshots;"
 ```
 
-**Git workflow (before upgrades):**
+**Git workflow (ALWAYS create branch for every change):**
 ```bash
-git checkout main
-git pull
-git checkout -b feature/your-feature-name
-# Make changes, test, commit
-git checkout main
+# ORDER: Code → Test → Document → Merge
+
+# 1. Create branch
+git status  # Check current branch
+git checkout -b feature/your-feature-name  # Branch off current branch
+
+# 2. Make code changes
+# ... write code ...
+
+# 3. TEST FIRST - Verify everything works
+python app.py
+curl http://localhost:5000/health
+# Test actual functionality, verify database writes, check logs
+
+# 4. Commit code (after testing passes)
+git add .
+git commit -m "Add feature: description"
+
+# 5. DOCUMENT AFTER TESTING CONFIRMED
+# Add docstrings, update docs/GUIDE.md, README.md, etc.
+git add .
+git commit -m "docs: Add documentation for feature"
+
+# 6. Merge ONLY after documentation complete
+git checkout <parent-branch-name>
 git merge feature/your-feature-name
 ```
 
@@ -475,19 +547,21 @@ sqlite3 data/wallet_backup_YYYYMMDD_HHMMSS.db "PRAGMA integrity_check;"
 
 ## Session Checklist
 
-Before ending a coding session:
+Before ending a coding session (follow this order):
 
+- [ ] Git branch created (ALWAYS required for any change)
 - [ ] Database backed up (if any DB changes)
-- [ ] Changes tested and verified working
-- [ ] Code documented (docstrings, comments)
-- [ ] Documentation updated (README.md, GUIDE.md if needed)
-- [ ] Session notes created (for major changes)
-- [ ] CLAUDE.md updated (if new gotcha discovered)
-- [ ] Git branch created (if upgrade/major change)
+- [ ] Code changes made
+- [ ] Changes tested and verified working (TEST FIRST - verify routes, DB writes, logs)
+- [ ] Code documented (docstrings, comments) - AFTER testing confirmed
+- [ ] Documentation updated (README.md, GUIDE.md if needed) - AFTER testing confirmed
+- [ ] Session notes created (for major changes) - AFTER testing confirmed
+- [ ] CLAUDE.md updated (if new gotcha discovered) - AFTER testing confirmed
 - [ ] No console errors
 - [ ] Health endpoint returns 200
+- [ ] Branch merged to parent (ONLY after documentation complete)
 
 ---
 
-**Remember**: Every session should leave the codebase better than it found it. Document gotchas, add logging, test thoroughly, backup before changes, and branch before upgrades.
+**Remember**: Every session should leave the codebase better than it found it. Document gotchas, add logging, test thoroughly, backup before changes, and ALWAYS create a branch for every change.
 
