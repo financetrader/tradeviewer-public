@@ -1543,51 +1543,155 @@ def admin_bulk_add_strategies():
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_assign_strategy():
+    """
+    Handle both single-pair (legacy form) and multi-pair assignments.
+    Multi-pair form sends arrays: symbols[], strategy_ids[], notes_list[]
+    Legacy form sends single values: symbol, strategy_id, notes
+    """
     try:
         wallet_id = sanitize_integer(request.form.get('wallet_id'), default=0, min_val=1)
-        symbol = sanitize_string(request.form.get('symbol', ''), max_length=20, allow_empty=False)
-        strategy_id = sanitize_integer(request.form.get('strategy_id'), default=0, min_val=1)
-        notes = sanitize_text(request.form.get('notes', ''), max_length=1000) or None
         is_current = request.form.get('is_current') == '1'
     except Exception:
         wallet_id = 0
-        symbol = ''
-        strategy_id = 0
-        notes = None
         is_current = True
-    if not wallet_id or not symbol or not strategy_id:
-        app.logger.warning(f"Missing required fields: wallet_id={wallet_id}, symbol={symbol}, strategy_id={strategy_id}")
-        flash('Wallet, Symbol and Strategy are required', 'error')
+
+    if not wallet_id:
+        app.logger.warning(f"Missing required wallet_id")
+        flash('Wallet is required', 'error')
         return redirect(url_for('admin_strategies'))
+
+    # Check if this is multi-pair form (arrays) or legacy single-pair form
+    symbols_list = request.form.getlist('symbols')
+    strategy_ids_list = request.form.getlist('strategy_ids')
+    notes_list = request.form.getlist('notes_list')
+
+    # If no arrays provided, try legacy single-pair format
+    if not symbols_list:
+        symbol = sanitize_string(request.form.get('symbol', ''), max_length=20, allow_empty=False)
+        strategy_id = sanitize_integer(request.form.get('strategy_id'), default=0, min_val=1)
+        notes = sanitize_text(request.form.get('notes', ''), max_length=1000) or None
+
+        if not symbol or not strategy_id:
+            app.logger.warning(f"Missing required fields: wallet_id={wallet_id}, symbol={symbol}, strategy_id={strategy_id}")
+            flash('Wallet, Symbol and Strategy are required', 'error')
+            return redirect(url_for('admin_strategies'))
+
+        symbols_list = [symbol]
+        strategy_ids_list = [str(strategy_id)]
+        notes_list = [notes]
+
+    # Validate that arrays have matching lengths
+    if not (len(symbols_list) == len(strategy_ids_list)):
+        app.logger.warning(f"Array length mismatch: symbols={len(symbols_list)}, strategies={len(strategy_ids_list)}")
+        flash('Symbols and strategies must have matching counts', 'error')
+        return redirect(url_for('admin_strategies'))
+
+    # Pad notes_list to match if needed
+    if len(notes_list) < len(symbols_list):
+        notes_list.extend([''] * (len(symbols_list) - len(notes_list)))
+
+    # Process all pairs
+    assignment_count = 0
+    errors = []
+
     try:
         with get_session() as session:
-            # Validate symbol format
-            normalized_symbol = validate_symbol(symbol)
-            if not normalized_symbol:
-                app.logger.warning(f"Invalid symbol format: {symbol}")
-                flash('Invalid symbol format. Symbols must be 1-20 alphanumeric characters.', 'error')
-                return redirect(url_for('admin_strategies'))
-            
-            existing = session.query(StrategyAssignment).filter(
-                StrategyAssignment.wallet_id == wallet_id,
-                StrategyAssignment.symbol == normalized_symbol,
-                StrategyAssignment.active == True
-            ).all()
+            for i, symbol in enumerate(symbols_list):
+                # Sanitize inputs
+                symbol = sanitize_string(symbol, max_length=20, allow_empty=False).strip()
+                strategy_id = sanitize_integer(strategy_ids_list[i], default=0, min_val=1)
+                notes = sanitize_text(notes_list[i] if i < len(notes_list) else '', max_length=1000) or None
 
-            for assignment in existing:
-                assignment.active = False
-                assignment.end_at = datetime.utcnow()
+                # Validate required fields
+                if not symbol or not strategy_id:
+                    errors.append(f"Pair {i + 1}: Missing symbol or strategy")
+                    continue
 
-            # Create new assignment with notes and is_current, using normalized symbol
-            app.logger.info(f"Creating assignment: wallet_id={wallet_id}, symbol={normalized_symbol}, strategy_id={strategy_id}, is_current={is_current}")
-            create_assignment(session, wallet_id, normalized_symbol, strategy_id, None, notes, is_current)
-            session.commit()
-            app.logger.info(f"Assignment created successfully")
-        flash('Strategy assignment updated successfully.', 'success')
+                # Validate symbol format
+                normalized_symbol = validate_symbol(symbol)
+                if not normalized_symbol:
+                    errors.append(f"Pair {i + 1}: Invalid symbol format '{symbol}'")
+                    continue
+
+                try:
+                    # Deactivate existing assignments for this wallet/symbol combo
+                    existing = session.query(StrategyAssignment).filter(
+                        StrategyAssignment.wallet_id == wallet_id,
+                        StrategyAssignment.symbol == normalized_symbol,
+                        StrategyAssignment.active == True
+                    ).all()
+
+                    for assignment in existing:
+                        assignment.active = False
+                        assignment.end_at = datetime.utcnow()
+
+                    # Create new assignment
+                    app.logger.info(f"Creating assignment {i + 1}/{len(symbols_list)}: wallet_id={wallet_id}, symbol={normalized_symbol}, strategy_id={strategy_id}")
+                    create_assignment(session, wallet_id, normalized_symbol, strategy_id, None, notes, is_current)
+                    assignment_count += 1
+
+                except Exception as e:
+                    errors.append(f"Pair {i + 1} ({symbol}): {str(e)}")
+                    app.logger.error(f"Error creating assignment for pair {i + 1}: {e}", exc_info=True)
+                    continue
+
+            # Commit all successful assignments
+            if assignment_count > 0:
+                session.commit()
+                app.logger.info(f"Successfully created {assignment_count} assignments")
+
     except Exception as e:
-        app.logger.error(f"Error creating assignment: {e}", exc_info=True)
-        flash(f'Error creating assignment: {e}', 'error')
+        app.logger.error(f"Error in transaction: {e}", exc_info=True)
+        flash(f'Error creating assignments: {e}', 'error')
+        return redirect(url_for('admin_strategies'))
+
+    # Report results
+    if assignment_count > 0:
+        message = f'Successfully created {assignment_count} strategy assignment{"s" if assignment_count != 1 else ""}.'
+        if errors:
+            message += f' {len(errors)} pair(s) failed.'
+        flash(message, 'success')
+    else:
+        flash(f'No assignments created. Errors: {"; ".join(errors)}', 'error')
+
+    if errors:
+        app.logger.warning(f"Assignment errors: {errors}")
+
     return redirect(url_for('admin_strategies'))
+
+
+@app.route("/api/symbol-suggestions", methods=['GET'])
+@limiter.limit(RATE_LIMITS['api'])
+def get_symbol_suggestions():
+    """
+    Get symbol suggestions for autocomplete based on existing assignments.
+    Returns list of unique symbols from strategy assignments.
+
+    Query params:
+    - q: Optional search query to filter symbols (e.g., "BTC" returns "BTC-USDT", "BTC-USD")
+    """
+    try:
+        query = request.args.get('q', '').strip().upper()
+
+        with get_session() as session:
+            # Get all unique symbols from active assignments
+            all_symbols = session.query(StrategyAssignment.symbol).filter(
+                StrategyAssignment.active == True
+            ).distinct().all()
+
+            # Extract symbol strings and deduplicate
+            symbols = sorted(list(set([s[0] for s in all_symbols if s[0]])))
+
+            # Filter by query if provided
+            if query:
+                symbols = [s for s in symbols if query in s]
+
+            # Return top 15 suggestions
+            return jsonify({'symbols': symbols[:15]})
+
+    except Exception as e:
+        app.logger.error(f"Error fetching symbol suggestions: {e}", exc_info=True)
+        return jsonify({'symbols': [], 'error': str(e)}), 500
 
 
 @app.route("/admin/strategies/end/<int:assignment_id>", methods=['POST'])
