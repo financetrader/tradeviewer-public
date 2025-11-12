@@ -400,11 +400,11 @@
 
                     <div style="border: 1px solid #252b4a; border-radius: 4px; overflow: hidden;">
                         <!-- Header Row -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 120px auto; gap: 10px; padding: 12px; background: #1a1f3a; border-bottom: 1px solid #252b4a; font-weight: 600; color: #8b92b0; font-size: 0.9rem;">
-                            <div>Symbol / Pair</div>
+                        <div style="display: grid; grid-template-columns: 150px 1fr 100px auto; gap: 8px; padding: 10px; background: #1a1f3a; border-bottom: 1px solid #252b4a; font-weight: 600; color: #8b92b0; font-size: 0.85rem;">
+                            <div>Symbol</div>
                             <div>Strategy</div>
                             <div>Notes</div>
-                            <div></div>
+                            <div style="text-align: center; width: 50px;"></div>
                         </div>
 
                         <!-- Pair Rows -->
@@ -456,7 +456,7 @@
 
             const row = document.createElement('div');
             row.id = rowId;
-            row.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr 120px auto; gap: 10px; padding: 10px; border-bottom: 1px solid #252b4a; align-items: center;';
+            row.style.cssText = 'display: grid; grid-template-columns: 150px 1fr 100px auto; gap: 8px; padding: 10px; border-bottom: 1px solid #252b4a; align-items: center;';
 
             const strategyOptions = strategiesData.map(s => `<option value="${s.id}" ${s.id == strategyId ? 'selected' : ''}>${s.name}</option>`).join('');
 
@@ -468,15 +468,15 @@
 
             row.innerHTML = `
                 <div style="position: relative;">
-                    <input type="text" class="pair-symbol" name="symbols" list="${datalistId}" placeholder="e.g., BTC-USDT" value="${symbol}" style="padding: 8px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; width: 100%;">
+                    <input type="text" class="pair-symbol" name="symbols" list="${datalistId}" placeholder="BTC-USDT" value="${symbol}" style="padding: 6px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; width: 100%; font-size: 0.9rem;">
                     ${datalistHTML}
                 </div>
-                <select class="pair-strategy" name="strategy_ids" style="padding: 8px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff;">
+                <select class="pair-strategy" name="strategy_ids" style="padding: 6px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.9rem;">
                     <option value="">Select...</option>
                     ${strategyOptions}
                 </select>
-                <input type="text" class="pair-notes" name="notes_list" placeholder="Testing" value="${notes}" style="padding: 8px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.9rem;">
-                <button type="button" style="padding: 6px 12px; background: #ff4757; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.9rem;" onclick="removePairRow('${rowId}')">Remove</button>
+                <input type="text" class="pair-notes" name="notes_list" placeholder="Notes" value="${notes}" style="padding: 6px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.85rem;">
+                <button type="button" style="padding: 6px 10px; background: #ff4757; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.8rem; white-space: nowrap;" onclick="removePairRow('${rowId}')">✕</button>
             `;
 
             container.appendChild(row);
