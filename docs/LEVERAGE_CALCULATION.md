@@ -1,360 +1,335 @@
-# Leverage Calculation Flow
+# Leverage Calculation Guide
+
+**Status**: Core implementation complete. Margin delta tracking working for both Apex Omni and Hyperliquid.
 
 ## Overview
 
-The application calculates and stores leverage for trades in two ways:
-1. **Position Snapshots**: Leverage estimated when positions are open (every 30 minutes)
-2. **Closed Trades**: Leverage copied from position snapshots when trades close
+Leverage is **calculated once when positions OPEN** and stored in `position_snapshots`. This is when leverage becomes **available for display** on open positions. When positions close and trades are synced, the leverage is **retrieved** from the position_snapshots (where it was already calculated) and stored in `closed_trades` for historical record. Leverage is then propagated to `aggregated_trades`.
 
-## Current Implementation
+```
+Position Opens
+    ↓
+Logger runs while position is OPEN
+├─ Stores PositionSnapshot with calculated leverage
+└─ Leverage NOW AVAILABLE for display (open position)
 
-### Step 1: Background Logger Runs (Every 30 Minutes)
+(Position remains open - leverage displayed from position_snapshots)
+    ↓
+Position Closes (trade executed on exchange)
+    ↓
+Logger syncs closed trade
+├─ Retrieves leverage from PositionSnapshot (calculated at open)
+└─ Stores in ClosedTrade for historical record
 
+Aggregated Trades are created
+    ↓
+Takes leverage from primary fill's ClosedTrade
+```
+
+**Key Distinction**: Leverage is displayed on open positions as soon as it's calculated (stored in position_snapshots). It's not waiting until the trade closes - it's available for the entire duration the position is open.
+
+## Data Flow
+
+### Step 1: Position Opens
+User opens a position on the exchange. The position is detected and monitored by the background logger.
+
+### Step 2: Logger Calculates Leverage (Every 30 minutes)
 **File**: `logger.py` (lines 70-122)
 
-The background logger periodically fetches current positions from Hyperliquid API:
+The background logger runs every 30 minutes and:
+1. Fetches all open positions from exchange API
+2. Fetches account balance/margin data
+3. For each position, **calculates leverage** using exchange-specific method
+4. Stores in `position_snapshots` table with the calculated leverage
 
-```
-Logger runs every 30 minutes
-    ↓
-Fetch current open positions from Hyperliquid API
-    ↓
-For each position:
-    ├─ Get account_equity (total wallet equity)
-    ├─ Calculate position_size_usd = size × entry_price
-    ├─ Call: estimate_leverage_hyperliquid(
-    │   position_size_usd,
-    │   account_equity,
-    │   position_value (from API)
-    │ )
-    ├─ Create position_data dict with leverage value
-    └─ Insert into position_snapshots table
-    ↓
-Also stores equity snapshot:
-    ├─ timestamp
-    └─ total_equity (account_equity)
-```
+### Step 3: Position Closes
+User closes the position on the exchange. Trade is executed immediately.
 
-### Step 2: Leverage Estimation Algorithm
-
-**File**: `utils/calculations.py` (lines 69-144)
-
-Function: `estimate_leverage_hyperliquid(position_size_usd, account_equity, position_value)`
-
-#### Method 1: Using position_value (from Hyperliquid API)
-
-```
-If position_value >= account_equity:
-    # Position is at least as large as account equity = leveraged
-    estimated_equity_used = account_equity × 0.6  (assume 60% of equity used)
-    leverage = position_size_usd / estimated_equity_used
-
-Else:
-    # Position smaller than account equity
-    estimated_equity_used = position_value × 0.8  (assume 80% of position_value)
-    leverage = position_size_usd / estimated_equity_used
-```
-
-#### Method 2: Fallback (when position_value not available)
-
-```
-position_ratio = position_size_usd / account_equity
-
-If position_ratio >= 1.0:
-    # Position larger than equity = leveraged
-    estimated_equity_used = account_equity × 0.5
-    leverage = position_size_usd / estimated_equity_used
-
-Else:
-    # Position smaller than equity
-    equity_used_ratio = max(0.1, position_ratio × 0.7)
-    estimated_equity_used = account_equity × equity_used_ratio
-    leverage = position_size_usd / estimated_equity_used
-```
-
-**Result**: Capped at 50.0x max, rounded to 1 decimal place
-
-**Storage**: `position_snapshots.leverage`
-
-### Step 3: Trade Closes (User Executes Trade on Exchange)
-
-The trade fill is executed on the exchange immediately, but not synced to our database until the background logger runs again.
-
-### Step 4: Background Logger Syncs Closed Trade
-
+### Step 4: Logger Syncs Closed Trade
 **File**: `services/sync_service.py` (lines 12-56)
 
-Function: `sync_closed_trades_from_fills(session, fills, wallet_id)`
+When logger syncs closed trade fills:
+1. Extracts trade details from exchange API
+2. **Looks up leverage** from `position_snapshots` using `get_leverage_at_timestamp()`
+   - Finds most recent PositionSnapshot for same symbol before trade timestamp
+   - Retrieves its leverage value (which was calculated at position open time)
+3. Stores result in `closed_trades` table with leverage
 
-```
-For each closed trade fill from exchange:
-    ├─ Extract: timestamp, symbol, size, entry_price, closed_pnl, fees
-    │
-    ├─ Resolve strategy_id:
-    │   └─ Call: resolve_strategy_id(wallet_id, symbol, timestamp)
-    │
-    ├─ Look up leverage from position snapshots:
-    │   └─ Call: get_leverage_at_timestamp(wallet_id, symbol, timestamp)
-    │       ├─ Query PositionSnapshot where:
-    │       │   • symbol matches
-    │       │   • timestamp <= trade_timestamp
-    │       │   • leverage IS NOT NULL
-    │       │   • size > 0
-    │       └─ Return: Most recent leverage value (order by timestamp DESC)
-    │
-    ├─ Create closed_trade record with:
-    │   ├─ timestamp
-    │   ├─ symbol
-    │   ├─ size
-    │   ├─ entry_price
-    │   ├─ exit_price
-    │   ├─ closed_pnl
-    │   ├─ leverage (from step above)
-    │   └─ strategy_id
-    │
-    └─ Store in closed_trades table
-```
-
-**File**: `db/queries.py` (lines 322-359)
-
-Function: `get_leverage_at_timestamp(wallet_id, symbol, timestamp)`
-
-```
-SELECT leverage FROM position_snapshots
-WHERE:
-    symbol = normalized_symbol
-    timestamp <= trade_timestamp
-    leverage IS NOT NULL
-    size > 0
-    wallet_id = wallet_id
-ORDER BY timestamp DESC
-LIMIT 1
-```
-
-### Step 5: Aggregated Trades Get Leverage
-
+### Step 5: Aggregated Trades Inherit Leverage
 **File**: `services/aggregation_service.py` (lines 10-114)
 
-Function: `sync_aggregated_trades(session, wallet_id)`
-
 When fills are aggregated by (wallet_id, timestamp, symbol):
-```
-For each group of fills:
-    ├─ Sum up sizes, fees, PnL
-    ├─ Calculate weighted average entry/exit prices
-    ├─ Use leverage from primary (first) fill
-    └─ Store in aggregated_trades table
-```
+1. Groups multiple fills from same trade
+2. Takes leverage from primary fill's `closed_trades.leverage`
+3. Stores in `aggregated_trades` table
 
-**Result**: `aggregated_trades.leverage` = same as `closed_trades.leverage`
+**Result**: `aggregated_trades.leverage` = same as `closed_trades.leverage` = calculated at position open time
 
-## Data Flow Summary
+## Leverage Calculation Methods by Exchange
 
+### Apex Omni
+
+**Method**: Initial Margin Delta Tracking
+
+**Data Available**:
+- `initialMargin` (total account margin across all positions)
+- `customInitialMarginRate` (per-position, but sometimes returns 0)
+- `totalEquityValue` (account equity)
+
+**Algorithm**:
 ```
-┌─────────────────────────────────────────────────────────┐
-│ OPEN POSITION                                           │
-│ (User opens trade on Hyperliquid)                       │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────────────────────┐
-│ BACKGROUND LOGGER RUNS (every 30 min)                   │
-├─────────────────────────────────────────────────────────┤
-│ • Fetches open positions from API                       │
-│ • Calculates leverage (estimated)                       │
-│ • Stores in: position_snapshots (with leverage)         │
-│ • Stores in: equity_snapshots (total equity)            │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────────────────────┐
-│ POSITION SNAPSHOTS TABLE                                │
-│ ├─ timestamp                                            │
-│ ├─ symbol (SOL, ETH, BTC, etc)                         │
-│ ├─ size (amount held)                                  │
-│ ├─ leverage (ESTIMATED from formula)                    │
-│ └─ entry_price                                          │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────────────────────┐
-│ USER CLOSES TRADE                                       │
-│ (Trade executed on Hyperliquid)                         │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────────────────────┐
-│ BACKGROUND LOGGER SYNCS CLOSED TRADE                    │
-├─────────────────────────────────────────────────────────┤
-│ • Fetches closed fills from API                         │
-│ • Looks up leverage from position_snapshots             │
-│ • Stores in: closed_trades (with leverage)             │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────────────────────┐
-│ CLOSED TRADES TABLE                                     │
-│ ├─ timestamp                                            │
-│ ├─ symbol                                              │
-│ ├─ size                                                │
-│ ├─ entry_price / exit_price                            │
-│ ├─ closed_pnl                                          │
-│ ├─ leverage (from position_snapshots)                   │
-│ └─ strategy_id                                          │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-                   ↓
-┌─────────────────────────────────────────────────────────┐
-│ AGGREGATED TRADES (group by timestamp+symbol)           │
-│ ├─ total_size (sum of fills)                            │
-│ ├─ total_pnl (sum of PnLs)                             │
-│ ├─ leverage (from primary fill)                         │
-│ └─ fill_count (how many fills grouped)                  │
-└─────────────────────────────────────────────────────────┘
+1. Detect NEW position (first snapshot with size > 0 for symbol)
+2. Get previous initialMargin from last EquitySnapshot
+3. Calculate: equity_used = current_initial_margin - previous_initial_margin
+4. Calculate: leverage = position_size_usd / equity_used
+5. Cap at 50.0x, round to 1 decimal
 ```
 
-## Current Limitations
-
-1. **Estimation Not Actual**: Leverage is estimated using percentage-based formulas, not actual margin data
-   - 60% and 80% are guesses
-   - May be inaccurate for cross-margin with multiple positions
-
-2. **Position Value Dependency**: Only as good as Hyperliquid's `position_value` field
-   - Hyperliquid doesn't provide margin rate or actual leverage
-   - Falls back to rough estimation if position_value not available
-
-3. **No Historical Leverage for Old Trades**:
-   - Trades from before logger was running have no leverage data
-   - Can only look up leverage from position snapshots that exist
-
-4. **Cross-Margin Complexity**:
-   - For accounts with multiple positions, leverage calculation is less accurate
-   - One position's margin affects others' available equity
-
-## Alternative Approach: Equity Delta Method
-
-### Concept
-
-Calculate leverage from actual account equity movement:
-
+**Example**:
 ```
-leverage = position_size_usd / equity_delta
+Time T1: Total Margin = $0
+Time T2: Open BTC (0.008 BTC @ $101,284 = $810.27)
+  Current Margin: $162.22
+  Margin Delta: $162.22 - $0 = $162.22
+  Leverage: $810.27 / $162.22 = 5.0x ✓
 
-Where:
-  equity_delta = account_equity_at_position_open - account_equity_at_position_close
+Time T3: Open SOL (0.5 SOL @ $155.82 = $77.91) - still have BTC
+  Current Margin: $166.12
+  Margin Delta: $166.12 - $162.22 = $3.90
+  Leverage: $77.91 / $3.90 = 20.0x ✓
 ```
 
-### Example
-
+**Fallback**: If not a new position or no previous data, use `customInitialMarginRate`:
 ```
-Position opened at 10:00 AM → Equity: $1,500
-Position closed at 10:30 AM → Equity: $1,350
-Equity delta: $150 (margin used)
-
-Position size: 2.5 SOL × $160 = $400
-Leverage: $400 / $150 = 2.67x
+leverage = 1 / customInitialMarginRate
 ```
 
-### Advantages
+**Implementation**: See [APEX_LEVERAGE_CALCULATION.md](./APEX_LEVERAGE_CALCULATION.md)
 
-- ✅ Uses **actual equity movement**, not estimates
-- ✅ Automatically accounts for:
-  - Trading fees
-  - Funding fees
-  - Liquidation penalties
-  - Cross-margin effects
-- ✅ More accurate over time
-- ✅ Simple calculation
+### Hyperliquid
 
-### Requirements
+**Method**: Total Margin Delta Tracking (identical to Apex)
 
-- Must have equity snapshots both before and after trade timestamp
-- Background logger must be running regularly
-- Needs at least 2 equity snapshots around trade
+**Data Available**:
+- `totalMarginUsed` (total account margin across all positions)
+- `positionValue` (notional position value)
+- `accountValue` (account equity)
 
-### Implementation
-
-Would replace leverage lookup in `sync_service.py`:
-
-```python
-# Current (line 32):
-leverage = queries.get_leverage_at_timestamp(session, wallet_id, sym, ts)
-
-# Alternative:
-leverage = queries.get_leverage_from_equity_delta(session, wallet_id, ts, position_size_usd)
+**Algorithm**:
+```
+1. Detect NEW position (first snapshot with size > 0 for symbol)
+2. Get previous totalMarginUsed from last EquitySnapshot
+3. Calculate: equity_used = current_total_margin - previous_total_margin
+4. Calculate: leverage = position_size_usd / equity_used
+5. Cap at 50.0x, round to 1 decimal
 ```
 
-New function would:
-1. Find equity snapshot before or at trade timestamp
-2. Find equity snapshot after trade timestamp
-3. Calculate equity_delta = before - after
-4. Return: position_size_usd / equity_delta (if delta > 0)
+**Why This Works with Cross-Margin**:
+Hyperliquid uses cross-margin (all positions share margin pool). When you open a position, `totalMarginUsed` increases by exactly the margin for that position. The delta isolates that specific position's margin perfectly.
+
+**Example**:
+```
+Time T1: Total Margin Used = $0
+Time T2: Open ETH (10 ETH @ $2,000 = $20,000)
+  Current Margin: $2,000 (for 10x leverage)
+  Margin Delta: $2,000 - $0 = $2,000
+  Leverage: $20,000 / $2,000 = 10x ✓
+```
+
+**Fallback**: Old estimation method (deprecated, only for existing positions):
+```
+if position_value >= account_equity:
+    equity_used = account_equity × 0.6
+else:
+    equity_used = position_value × 0.8
+leverage = position_size_usd / equity_used
+```
+
+**Implementation**: See [HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md](./HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md)
 
 ## Database Schema
 
 ### position_snapshots
-```
-├─ id (primary key)
+```sql
 ├─ wallet_id
-├─ timestamp
-├─ symbol
-├─ side (LONG/SHORT)
-├─ size (amount held)
+├─ timestamp          -- When position snapshot was taken
+├─ symbol            -- Position symbol (e.g., SOL, BTC, ETH)
+├─ side              -- LONG or SHORT
+├─ size              -- Amount held
 ├─ entry_price
-├─ current_price
-├─ position_size_usd
-├─ leverage ← Calculated when position is open
-├─ unrealized_pnl
-├─ equity_used
-└─ calculation_method (how leverage was calculated)
+├─ leverage          -- CALCULATED when position is OPEN
+├─ equity_used       -- Equity allocated to this position
+├─ initial_margin_at_open  -- Total margin when position opened
+├─ calculation_method -- 'margin_delta', 'margin_rate', or 'unknown'
+└─ other fields...
 ```
 
+**When filled**: Every 30 minutes when logger runs (if position is open)
+**Key field**: `leverage` - calculated at this moment when position exists
+
 ### closed_trades
-```
-├─ id (primary key)
+```sql
 ├─ wallet_id
-├─ timestamp
+├─ timestamp          -- When trade was executed
 ├─ symbol
 ├─ side
 ├─ size
 ├─ entry_price
 ├─ exit_price
 ├─ closed_pnl
-├─ leverage ← Copied from position_snapshots
-├─ close_fee
-├─ open_fee
-├─ strategy_id
-└─ calculation_method
+├─ leverage          -- RETRIEVED from position_snapshots
+├─ calculation_method
+└─ strategy_id
 ```
+
+**When filled**: When trade is synced from exchange fills
+**Key field**: `leverage` - looked up from position snapshot (calculated at open time)
 
 ### aggregated_trades
-```
-├─ id (primary key)
+```sql
 ├─ wallet_id
-├─ timestamp
+├─ timestamp          -- When the aggregate trade occurred
 ├─ symbol
 ├─ side
-├─ size (sum of fills)
-├─ avg_entry_price (weighted)
-├─ avg_exit_price (weighted)
-├─ total_pnl (sum of fills)
-├─ leverage ← From primary fill
-├─ fill_count (how many fills aggregated)
-└─ calculation_method
+├─ size              -- Sum of all fills
+├─ avg_entry_price   -- Weighted average
+├─ avg_exit_price    -- Weighted average
+├─ total_pnl         -- Sum of all fills' PnL
+├─ leverage          -- From primary fill's closed_trade
+├─ fill_count        -- Number of fills in this group
+└─ other fields...
 ```
 
+**When filled**: When closed_trades are aggregated
+**Key field**: `leverage` - copied from primary fill
+
 ### equity_snapshots
-```
-├─ id (primary key)
+```sql
 ├─ wallet_id
-├─ timestamp
-└─ total_equity ← Actual account equity at this moment
+├─ timestamp         -- When snapshot was taken
+├─ total_equity      -- Account equity at this moment
+├─ initial_margin    -- For Apex: initialMargin; For Hyperliquid: totalMarginUsed
+└─ other fields...
 ```
+
+**When filled**: Every time API is queried (every 30 minutes)
+**Purpose**: Track account-level metrics for leverage delta calculations
+
+## Current Limitations & Edge Cases
+
+### 1. Existing Positions (Opened Before Tracking Started)
+- **Problem**: No previous margin snapshot to calculate delta
+- **Current**: Uses fallback method (margin rate if available, else "unknown")
+- **Future**: Could backfill using historical analysis
+
+### 2. Multiple Positions Opened Simultaneously
+- **Problem**: Cannot determine which position used which portion of margin increase
+- **Current**: Logs warning, calculates with total delta (may be slightly inaccurate)
+- **Future**: Better heuristics for attribution
+
+### 3. No Historical Data for Old Trades
+- **Problem**: Trades from Aug-Nov 7 have no leverage (logger not running then)
+- **Current**: These trades show `leverage: NULL`
+- **Note**: EquitySnapshots only exist from Nov 11 onwards
+
+### 4. Position Size Changes (Adding to Position)
+- **Problem**: When user adds to existing position, treated as existing (not new)
+- **Current**: Margin delta not recalculated
+- **Future**: Could detect and recalculate
+
+## Verification & Debugging
+
+### Check If Working
+
+```sql
+-- Check equity snapshots are being created
+SELECT COUNT(*), MAX(timestamp) FROM equity_snapshots WHERE wallet_id = X;
+
+-- Check position snapshots have leverage values
+SELECT COUNT(*), AVG(leverage), MAX(leverage)
+FROM position_snapshots
+WHERE wallet_id = X AND leverage IS NOT NULL;
+
+-- Check closed trades received leverage from position snapshots
+SELECT COUNT(*), AVG(leverage), MAX(leverage)
+FROM closed_trades
+WHERE wallet_id = X AND leverage IS NOT NULL;
+
+-- Check aggregated trades have leverage
+SELECT COUNT(*), AVG(leverage), MAX(leverage)
+FROM aggregated_trades
+WHERE wallet_id = X AND leverage IS NOT NULL;
+```
+
+### Find Leverage Calculation Method Used
+
+```sql
+-- For a specific symbol
+SELECT symbol, leverage, calculation_method, timestamp
+FROM position_snapshots
+WHERE wallet_id = X AND symbol = 'SOL'
+ORDER BY timestamp DESC
+LIMIT 5;
+```
+
+### Verify Calculation Manually
+
+For Apex with 5x leverage on 0.008 BTC @ $101,284:
+- Position size: 0.008 × $101,284 = $810.27
+- At 5x leverage: Equity used = $810.27 / 5 = $162.22
+- Check database: `equity_used` should be ~$162.22
+
+For Hyperliquid with 10x leverage on 10 ETH @ $2,000:
+- Position size: 10 × $2,000 = $20,000
+- At 10x leverage: Equity used = $20,000 / 10 = $2,000
+- Check database: `equity_used` should be ~$2,000
+
+## Related Files & Implementation
+
+**Core Implementation**:
+- `logger.py` (lines 70-122) - Background logger that fetches positions and calculates leverage
+- `services/sync_service.py` (lines 12-56) - Syncs closed trades, looks up leverage
+- `db/queries.py` (lines 322-359) - `get_leverage_at_timestamp()` function
+- `utils/calculations.py` (lines 69-144) - `estimate_leverage_hyperliquid()` function
+
+**Exchange-Specific**:
+- `services/apex_leverage_calculator.py` - Apex margin delta calculations
+- `services/hyperliquid_leverage_calculator.py` - Hyperliquid margin delta calculations
+- `services/hyperliquid_client.py` - Hyperliquid API client
+- `services/apex_omni_client.py` - Apex Omni API client
+
+**Models & Migrations**:
+- `db/models.py` - Database models with `leverage`, `equity_used`, `calculation_method` fields
+- `db/migrations/` - Schema changes
 
 ## Future Improvements
 
-1. **Implement equity delta method** for more accurate leverage
-2. **Store calculation_method** to track which method was used
-3. **Add margin_rate from API** when Hyperliquid exposes it
-4. **Retroactively calculate** leverage for old trades when new equity data becomes available
-5. **Cross-margin analysis** to show how positions interact
+1. **Backfill historical positions**: Analyze equity snapshot history to calculate leverage for existing positions
+2. **Track calculation method**: Use `calculation_method` field consistently across all tables
+3. **Better simultaneous position handling**: Detect when multiple positions open in same period
+4. **Position size change detection**: Recalculate when users add/reduce position size
+5. **Real-time WebSocket**: Replace 30-minute polling with WebSocket for instant updates
+6. **API rate exposure**: Track margin_rate directly when/if exchanges expose it
+7. **Cross-margin optimization**: Account for how multiple positions interact
+
+## Deprecation Notes
+
+**DEPRECATED Files**:
+- `HYPERLIQUID_LEVERAGE_CALCULATION.md` - Old estimation method (now uses margin delta)
+- Estimation approach with 0.6, 0.8 ratios replaced by margin delta for new positions
+
+**KEPT for Reference**:
+- `APEX_LEVERAGE_CALCULATION.md` - Detailed Apex implementation
+- `HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md` - Detailed Hyperliquid implementation
+- `LEVERAGE_CALCULATION_STRATEGY.md` - General strategy overview
+- This file (`LEVERAGE_CALCULATION.md`) - Consolidated reference
+
+## Summary
+
+- **Leverage is calculated ONCE** when position opens and stored in `position_snapshots`
+- **Leverage is DISPLAYED** as soon as calculated (available for entire duration position is open)
+- **Leverage is STORED** in `closed_trades` when trade closes (for historical record, retrieved from position_snapshots)
+- **Both Apex and Hyperliquid** use margin delta tracking for new positions
+- **Method is tracked** in `calculation_method` field for debugging
+- **Old trades** (before logger started) show `NULL` for leverage
+- **New positions** going forward will have leverage calculated automatically and displayed
