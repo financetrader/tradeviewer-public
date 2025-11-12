@@ -312,17 +312,16 @@ For Hyperliquid with 10x leverage on 10 ETH @ $2,000:
 6. **API rate exposure**: Track margin_rate directly when/if exchanges expose it
 7. **Cross-margin optimization**: Account for how multiple positions interact
 
-## Deprecation Notes
+## Reference Files
 
-**DEPRECATED Files**:
-- `HYPERLIQUID_LEVERAGE_CALCULATION.md` - Old estimation method (now uses margin delta)
-- Estimation approach with 0.6, 0.8 ratios replaced by margin delta for new positions
+**ACTIVE & CURRENT**:
+- `APEX_LEVERAGE_CALCULATION.md` - Detailed Apex Omni margin delta implementation
+- `HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md` - Detailed Hyperliquid margin delta implementation (current method)
+- `LEVERAGE_CALCULATION_STRATEGY.md` - General strategy overview for all exchanges
+- This file (`LEVERAGE_CALCULATION.md`) - Primary consolidated reference
 
-**KEPT for Reference**:
-- `APEX_LEVERAGE_CALCULATION.md` - Detailed Apex implementation
-- `HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md` - Detailed Hyperliquid implementation
-- `LEVERAGE_CALCULATION_STRATEGY.md` - General strategy overview
-- This file (`LEVERAGE_CALCULATION.md`) - Consolidated reference
+**REMOVED**:
+- Deleted `HYPERLIQUID_LEVERAGE_CALCULATION.md` (old estimation method, no longer used)
 
 ## Summary
 
