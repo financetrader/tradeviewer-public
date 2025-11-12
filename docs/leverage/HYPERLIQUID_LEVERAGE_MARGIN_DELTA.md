@@ -6,8 +6,8 @@ Hyperliquid leverage is calculated using the **margin delta tracking** approach,
 
 **Implementation Status**: ✅ **COMPLETE**
 - ✅ **Margin delta method** implemented in `services/hyperliquid_leverage_calculator.py`
-- ✅ **Dashboard** (`app.py` lines 506-535): Uses margin delta for position display
-- ✅ **Dashboard** (`app.py` lines 839-863): Uses margin delta for position snapshots
+- ✅ **Dashboard display** (`app.py` lines 506-535): Uses margin delta for position display
+- ✅ **Dashboard snapshots** (`app.py` lines 847-870): Uses margin delta for position snapshots
 - ✅ **Background Logger** (`logger.py` lines 70-92): Uses margin delta for position logging
 
 **All components now use margin delta consistently.**
@@ -283,13 +283,15 @@ When you open a new Hyperliquid position:
 - ✅ Implemented in `services/hyperliquid_leverage_calculator.py`
 - ✅ Only calculates for NEW positions (detects via first snapshot with size > 0)
 - ✅ Fallback: "unknown" if no previous `totalMarginUsed` snapshot exists
-- ✅ Used in dashboard (`app.py` lines 506-535 and 839-863)
+- ✅ Used in dashboard display (`app.py` lines 506-535)
+- ✅ Used in dashboard snapshots (`app.py` lines 847-870)
 - ✅ Used in background logger (`logger.py` lines 70-92)
 
 **Old Estimation Method - REMOVED** (✅ Cleanup Complete):
 - ✅ Deleted from `utils/calculations.py` - `estimate_leverage_hyperliquid()` removed
 - ✅ Replaced in `logger.py` lines 70-92 with margin delta
-- ✅ Replaced in `app.py` lines 506-535 with margin delta
+- ✅ Replaced in `app.py` lines 506-535 (display) with margin delta
+- ✅ Replaced in `app.py` lines 847-870 (snapshots) with margin delta
 - ✅ Zero references to old method in functional code
 - Old method used inaccurate 0.6/0.8 ratio assumptions - no longer needed
 

@@ -4,7 +4,8 @@
 
 **Implementation Status**:
 - ✅ logger.py: Uses margin delta for Hyperliquid positions (lines 70-92)
-- ✅ app.py dashboard: Uses margin delta for both Apex and Hyperliquid (lines 506-535, 839-863)
+- ✅ app.py dashboard display: Uses margin delta for Hyperliquid (lines 506-535)
+- ✅ app.py snapshot storage: Uses margin delta for both Apex and Hyperliquid (lines 820-870)
 - ✅ Deprecated function: `estimate_leverage_hyperliquid()` removed from utils/calculations.py
 - ✅ Code cleanup: Zero references to old estimation method in functional code
 
@@ -45,8 +46,8 @@ User opens a position on the exchange.
 When positions are logged/monitored, both components use margin delta:
 
 **Dashboard** (`app.py`):
-- Lines 506-535: Dashboard position display uses `calculate_leverage_from_margin_delta()` for Hyperliquid
-- Lines 839-863: Position snapshot storage uses `calculate_leverage_from_margin_delta()` for both Apex and Hyperliquid
+- Lines 506-535: Position display uses `calculate_leverage_from_margin_delta()` for Hyperliquid
+- Lines 820-870: Position snapshot storage uses `calculate_leverage_from_margin_delta()` for both Apex (821-844) and Hyperliquid (847-870)
 - Calculates and stores in position_snapshots
 
 **Background Logger** (`logger.py` lines 70-92):
@@ -305,9 +306,9 @@ For Hyperliquid with 10x leverage on 10 ETH @ $2,000:
 - `services/hyperliquid_leverage_calculator.py` - Hyperliquid margin delta calculations
 
 **Active Usage of Margin Delta** (✅ All components):
-- `logger.py` lines 70-92 - Background logger calculates leverage using margin delta
-- `app.py` lines 506-535 - Dashboard position display uses margin delta
-- `app.py` lines 839-863 - Dashboard position snapshot storage uses margin delta
+- `logger.py` lines 70-92 - Background logger calculates leverage using margin delta for Hyperliquid
+- `app.py` lines 506-535 - Dashboard position display uses margin delta for Hyperliquid
+- `app.py` lines 820-870 - Dashboard position snapshot storage uses margin delta for both Apex and Hyperliquid
 
 **Deprecated Code** (✅ Removed):
 - ~~`utils/calculations.py` lines 69-144 - `estimate_leverage_hyperliquid()`~~ - **DELETED**
@@ -356,7 +357,7 @@ For detailed implementation specifics by exchange:
 - ✅ `calculation_method` field tracks how each leverage was calculated ('margin_delta', 'margin_rate', or 'unknown')
 
 **Completed Actions**:
-1. ✅ Replaced app.py lines 506-535 with margin delta calculation for dashboard display
+1. ✅ Replaced app.py lines 506-535 (display) and 820-870 (snapshots) with margin delta calculation
 2. ✅ Replaced logger.py lines 70-92 with margin delta for Hyperliquid background logging
 3. ✅ Deleted deprecated `estimate_leverage_hyperliquid()` function from utils/calculations.py
 4. ✅ Verified: Zero references to old estimation method in functional code
