@@ -280,7 +280,30 @@ except OperationalError as e:
         print("Warning: Column not found. Run migration first.")
 ```
 
-## 6. Document Platform Gotchas Immediately
+## 6. Never Include Personal Setup in Shared Documentation
+**CRITICAL**: Session notes and documentation in this repo should NOT contain personal/server-specific information.
+
+**Rules:**
+- **NEVER commit server IPs** to git (e.g., 91.99.142.197:5000)
+- **Session notes go in `docs/session-notes/`** and are gitignored (local only)
+- **Generic placeholders** in examples: `http://localhost:5000`, `<server-ip>:5000`, `your-domain.com`
+- **Never include**: Personal credentials, API keys, server passwords, specific user data
+- **Safe for git**: Development setup docs, architecture guides, deployment guides, examples with placeholders
+
+**Session Notes Guidelines:**
+- Session notes are for local development tracking only
+- Include in `.gitignore` (already done: `docs/session-notes/`)
+- Use for: implementation details, testing notes, troubleshooting steps, rollback procedures
+- Keep personal test URLs and IPs OUT of session notes
+- Or if using specific URLs for testing, use `localhost` or `<server-ip>` placeholders
+
+**Checked Locations:**
+- ✅ `README.md` - No personal setup (uses examples)
+- ✅ `docs/GUIDE.md` - No personal setup (uses localhost)
+- ✅ `docs/FRESH_SERVER_INSTALLATION.md` - No personal setup (uses placeholders)
+- ⚠️ `docs/session-notes/` - Added to .gitignore (not pushed to GitHub)
+
+## 7. Document Platform Gotchas Immediately
 Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 
 **Known Gotchas:**
@@ -293,6 +316,8 @@ Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 - **Portfolio equity aggregation**: DO NOT filter wallets based on staleness (e.g., no update in 1 hour). This causes artificial dips in equity charts. Wallets are the source of truth - aggregate ALL connected wallets' latest snapshots, no matter the age. Show staleness warnings in UI instead (see `db/queries.py:get_equity_history()`).
 - **Form array submission in Flask**: Use `request.form.getlist('fieldname')` to get HTML form arrays (when `<input name="symbol">` appears multiple times). Check for getlist() first, then fall back to get() for backwards compatibility with single-value forms. In templates, form fields with `name="symbols"` submit as array, not single string.
 - **Table filtering with data attributes**: Use `data-*` attributes on table rows for client-side filtering/sorting. Get filter/sort values from data attributes, not from displayed cell text. This allows filtering by different values than what's displayed (e.g., numeric trade count instead of text). Always use `.toLowerCase()` for case-insensitive string comparisons. See `templates/admin_strategies.html` for example implementation.
+- **Leverage calculation**: Uses estimated formulas (60%, 80% assumptions), NOT actual equity delta. See `docs/LEVERAGE_CALCULATION.md` for complete flow. Better approach: calculate from equity snapshots (position_size_usd / equity_delta). Currently positions are logged every 30 min with leverage estimates; when trade closes, leverage is looked up from position snapshots. For new trades going forward (with logger running): should get better accuracy from equity snapshots.
+- **Aggregated trades**: Exchange APIs return individual fills. System groups fills by (wallet_id, timestamp, symbol) into logical trades. Uses `aggregated_trades` table. UI shows aggregated view; raw fills still in `closed_trades`. 148 fills grouped into 29 logical trades.
 
 ## 7. Use Feature Flags for Experimental Code
 Toggle new features on/off without rebuilding. Makes rolling back instant when something breaks.

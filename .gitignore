@@ -43,6 +43,9 @@ htmlcov/
 # Documentation archives
 docs/archive/
 
+# Session notes (local development, not for commit)
+docs/session-notes/
+
 # IDE
 .vscode/
 .idea/

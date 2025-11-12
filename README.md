@@ -154,6 +154,8 @@ See `env.example` for a complete list of available environment variables.
 ### Documentation
 - `README.md` — This file (project overview)
 - `docs/GUIDE.md` — Complete setup, security, and deployment guide
+- `docs/FRESH_SERVER_INSTALLATION.md` — Step-by-step installation guide for fresh Linux servers
+- `docs/DOCUMENTATION_REVIEW.md` — Documentation review and verification report
 - `docs/rules.md` — Folder structure rules and organization guidelines
 - `docs/HYPERLIQUID_LEVERAGE_CALCULATION.md` — Hyperliquid leverage calculation methodology and implementation details
 - `docs/archive/documentation/TESTING.md` — Comprehensive testing guide
@@ -407,7 +409,9 @@ The dashboard automatically detects and visualizes missing data periods when the
 This feature helps monitor system health and ensures data integrity by making any missing data periods immediately obvious in the charts.
 
 ## Branching
-- Active development branch: `main`.
+- Active development branch: `master`.
+- Feature branches should be created with `feature/` prefix and merged back to `master`.
+- See [CLAUDE.md](CLAUDE.md) for complete branching workflow guidelines.
 - Do not perform git operations unless explicitly requested by the project owner.
 
 ## By Symbol PnL & All Trades (Realized)

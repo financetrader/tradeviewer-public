@@ -142,7 +142,7 @@ Nothing. No pre-existing features were affected.
 5. **Sort indicators** - Present on all columns ✓
 6. **Data attributes** - Present on all rows ✓
 
-### Visual Testing (Manual - Test at http://91.99.142.197:5000/admin/strategies)
+### Visual Testing (Manual - Test at http://localhost:5000/admin/strategies)
 1. **Page renders correctly** - Table visible with filter button above ✓
 2. **Show Filters button** - Visible and clickable ✓
 3. **Filter panel toggle** - Expands/collapses, button text changes ✓
@@ -247,7 +247,7 @@ Added rule about data attributes for filtering:
 ## Next Steps
 
 - [x] Implement filtering/sorting feature
-- [x] Test against http://91.99.142.197:5000/admin/strategies
+- [x] Test at http://localhost:5000/admin/strategies
 - [x] Create session notes
 - [ ] Push to GitHub
 - [ ] Merge to master
@@ -260,5 +260,5 @@ Added rule about data attributes for filtering:
 **Branch:** `feature/table-filtering-sorting`
 **Commit:** `f85dc84`
 **Date:** 2025-11-12 11:18 UTC
-**Tested at:** http://91.99.142.197:5000/admin/strategies
+**Testing Location:** http://localhost:5000/admin/strategies (or deployment server IP:5000/admin/strategies)
 
