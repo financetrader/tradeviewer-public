@@ -1,0 +1,150 @@
+# Essential Rules for Flask/Python Work with Claude Code
+# This file is automatically read by Claude Code in every conversation.
+# For full details, see CLAUDE.md
+
+## CRITICAL RULES - NEVER VIOLATE
+
+### 1. NEVER Delete the Database
+- NEVER run `rm data/wallet.db` or delete database files
+- Database contains all historical trading data, wallet configs, and encrypted credentials
+- If corrupted, restore from backup first
+- Exception: Only if explicitly requested by project owner AND verified backup exists
+
+### 2. Always Backup Before Database Modifications
+- BEFORE ANY database change: `cp data/wallet.db data/wallet_backup_$(date +%Y%m%d_%H%M%S).db`
+- Verify backup: `ls -lh data/wallet_backup_*.db`
+- Store backups in `data/` directory on server
+- Keep at least 2 recent backups
+- Backup before: migrations, bulk operations, manual SQL, code changes affecting DB, encryption key changes
+
+### 3. Always Branch Before Upgrades or Major Changes
+- NEVER commit upgrades directly to `main` branch
+- Create branch: `git checkout -b feature/upgrade-name` or `fix/bug-name` or `upgrade/dependency-name`
+- Test thoroughly on branch before merging
+- Exception: Only trivial changes (typos, formatting) with explicit approval
+
+### 4. Document Everything
+- Add docstrings to all new functions/classes
+- Update `docs/GUIDE.md` for API/config changes
+- Update `README.md` for user-facing features
+- Document migrations with rollback steps
+- Create session notes in `docs/session-notes/` for major changes
+- Add gotchas to `CLAUDE.md` immediately
+
+## Database & Code Rules
+
+### Database Migrations
+- Create migration files with Claude, but ALWAYS review SQL before running
+- Test on backup database first: `cp data/wallet.db data/wallet_backup_test.db`
+- Use try/except for queries referencing new columns (handle missing column gracefully)
+- Document migration order, dependencies, and rollback steps
+
+### Database Sessions (SQLAlchemy)
+- ALWAYS use context manager: `with get_session() as session:`
+- NEVER reuse sessions across requests
+- Commit explicitly: `session.commit()` after writes
+- Rollback on errors: `session.rollback()` in exception handlers
+
+### Background Threads
+- Each thread needs its own database session
+- Background threads don't have Flask request context
+- Use Python logging, not Flask's `app.logger` in background threads
+- Check `WERKZEUG_RUN_MAIN` to prevent double-starting in debug mode
+
+## Code Quality Rules
+
+### Testing
+- ALWAYS verify changes work before claiming success
+- Check: `ps aux | grep app.py`, `curl http://localhost:5000/health`
+- Test actual routes, verify database writes, check logs
+- Never assume changes worked without verification
+
+### Logging
+- Add `app.logger.info()` for complex flows
+- Log: API calls, database queries, position calculations, strategy resolution
+- Use format: `app.logger.info(f"Action: {variable}={value}")`
+
+### Scope
+- Keep conversations focused on single components
+- Good: "Add validation to wallet form"
+- Bad: "Refactor the whole app"
+
+### Feature Flags
+- Use env vars for experimental features: `EXPERIMENTAL_FEATURE = os.getenv('EXPERIMENTAL_FEATURE', 'false').lower() == 'true'`
+- Allows instant rollback without code changes
+
+## Platform Gotchas
+
+### Flask/SQLAlchemy/SQLite
+- SQLAlchemy scoped sessions: Use `with get_session() as session:` pattern
+- SQLite locking: Multiple threads writing can cause "database is locked" errors
+- Flask reloader: Background threads start twice in debug mode (use `WERKZEUG_RUN_MAIN` check)
+- CSRF tokens: Must include `{{ csrf_token() }}` in all POST forms
+
+### Symbol Normalization
+- ALWAYS normalize symbols before DB operations: `normalize_symbol(symbol)`
+- Normalize both sides before comparisons
+- Store normalized symbols in database
+- Display can show original format, but store normalized
+
+### Position Calculations
+- Reopened positions: Find most recent zero-size → non-zero transition
+- Multiple positions opened simultaneously: Margin delta can't be attributed to single position
+- No historical data: Can't calculate leverage for positions opened before tracking started
+- Always log calculation method used (`margin_delta`, `margin_rate`, `unknown`)
+
+### Exchange APIs
+- Add delays between rapid API calls: `time.sleep()`
+- Cache responses, don't fetch same data multiple times per request
+- Handle 429 (rate limit) errors gracefully
+- Log all API calls to `logs/exchange_traffic.log`
+
+### Encryption Keys
+- NEVER change `ENCRYPTION_KEY` without re-encrypting all credentials
+- Backup database before key changes
+- Users will need to re-enter API keys if key changes
+
+## Quick Commands Reference
+
+```bash
+# Backup database (ALWAYS before changes)
+cp data/wallet.db data/wallet_backup_$(date +%Y%m%d_%H%M%S).db
+
+# Check if app running
+ps aux | grep app.py
+curl http://localhost:5000/health
+
+# View logs
+tail -f logs/exchange_traffic.log
+
+# Git workflow (before upgrades)
+git checkout main
+git pull
+git checkout -b feature/your-feature-name
+# Make changes, test, commit
+git checkout main
+git merge feature/your-feature-name
+
+# Verify backup integrity
+sqlite3 data/wallet_backup_YYYYMMDD_HHMMSS.db "PRAGMA integrity_check;"
+```
+
+## Session Checklist
+
+Before ending coding session:
+- [ ] Database backed up (if any DB changes)
+- [ ] Changes tested and verified working
+- [ ] Code documented (docstrings, comments)
+- [ ] Documentation updated (README.md, GUIDE.md if needed)
+- [ ] Session notes created (for major changes)
+- [ ] CLAUDE.md updated (if new gotcha discovered)
+- [ ] Git branch created (if upgrade/major change)
+- [ ] No console errors
+- [ ] Health endpoint returns 200
+
+---
+
+**Remember**: Every session should leave the codebase better than it found it. Document gotchas, add logging, test thoroughly, backup before changes, and branch before upgrades.
+
+For full details and examples, see CLAUDE.md
+
