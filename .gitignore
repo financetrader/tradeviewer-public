@@ -63,3 +63,11 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Temporary work documents (planning, review, cleanup notes)
+*_CLEANUP_PLAN.md
+*_PLAN.md
+*_REVIEW.md
+LEVERAGE_CLEANUP_PLAN.md
+DOCUMENTATION_REVIEW.md
+DEPLOYMENT_README.md
+
