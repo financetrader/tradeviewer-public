@@ -1,0 +1,489 @@
+# Essential Rules for Flask/Python Work with Claude Code
+
+**How to Use This File with Claude Code:**
+- Reference this file at the start of conversations: `@CLAUDE.md` or mention "follow the rules in CLAUDE.md"
+- Claude Code will automatically read and follow these rules when you reference it
+- Keep this file updated as you discover new gotchas
+
+---
+
+## 1. NEVER Delete the Database
+**CRITICAL**: The database (`data/wallet.db`) contains all historical trading data, wallet configurations, and credentials. Deleting it is catastrophic.
+
+**Rules:**
+- **Never run**: `rm data/wallet.db` or `rm -f data/wallet.db`
+- **Never delete**: Database files, even if "recreating" seems easier
+- **If database is corrupted**: Restore from backup first, then investigate
+- **If you need a fresh start**: Create a new database file with a different name, don't delete the existing one
+
+**Exception**: Only delete if explicitly requested by project owner AND a verified backup exists.
+
+## 2. Always Backup Database Before Modifications
+**CRITICAL**: Before ANY database modification, create a backup and store it on the server.
+
+**Backup Process:**
+```bash
+# 1. Create timestamped backup in data/ directory
+cp data/wallet.db data/wallet_backup_$(date +%Y%m%d_%H%M%S).db
+
+# 2. Verify backup was created
+ls -lh data/wallet_backup_*.db
+
+# 3. Store backup on server (keep at least 2 recent backups)
+# Backups are stored in data/ directory on server
+# Format: wallet_backup_YYYYMMDD_HHMMSS.db
+```
+
+**When to Backup:**
+- **Before migrations**: Any schema changes
+- **Before bulk operations**: Large data imports/exports
+- **Before manual SQL**: Direct database queries that modify data
+- **Before code changes**: That might affect database writes
+- **Before encryption key changes**: Credentials will need re-encryption
+- **Weekly**: Automated backups (set up cron job)
+
+**Backup Storage:**
+- Store backups in `data/` directory on server
+- Keep at least 2 most recent backups
+- Older backups can be archived to `~/backups/` or external storage
+- Never commit backups to git (already in `.gitignore`)
+
+**Verification:**
+```bash
+# Check backup integrity
+sqlite3 data/wallet_backup_YYYYMMDD_HHMMSS.db "PRAGMA integrity_check;"
+
+# Compare sizes (should be similar)
+ls -lh data/wallet.db data/wallet_backup_*.db
+```
+
+## 3. Always Branch Before Upgrades or Major Changes
+**CRITICAL**: Never make upgrades or major changes directly on `main` branch.
+
+**Git Workflow:**
+```bash
+# 1. Check current branch and status
+git status
+git branch
+
+# 2. Create feature branch from main
+git checkout main
+git pull origin main  # If using remote
+git checkout -b feature/upgrade-dependencies
+# OR
+git checkout -b fix/position-calculation-bug
+# OR
+git checkout -b upgrade/flask-3.2.0
+
+# 3. Make changes, test thoroughly
+# ... make changes ...
+python app.py  # Test locally
+
+# 4. Commit changes
+git add .
+git commit -m "Description of changes"
+
+# 5. Test again after commit
+python app.py
+
+# 6. Merge back to main (only after testing)
+git checkout main
+git merge feature/upgrade-dependencies
+```
+
+**Branch Naming Conventions:**
+- `feature/` - New features
+- `fix/` - Bug fixes
+- `upgrade/` - Dependency or framework upgrades
+- `refactor/` - Code refactoring
+- `docs/` - Documentation updates
+
+**Rules:**
+- **Always branch** before: dependency upgrades, schema changes, major refactors
+- **Test on branch** before merging to main
+- **Never commit directly to main** for upgrades
+- **Document changes** in commit messages
+
+**Exception**: Only commit directly to main for trivial changes (typos, formatting) with explicit approval.
+
+## 4. Document Everything
+**CRITICAL**: Code without documentation is technical debt. Document as you go.
+
+**Documentation Locations:**
+- **Code changes**: Add docstrings to new functions/classes
+- **API changes**: Update `docs/GUIDE.md` with new endpoints
+- **Database changes**: Document schema changes in migration files
+- **Gotchas**: Add to this `CLAUDE.md` file immediately
+- **Session notes**: Create `docs/session-notes/YYYY-MM-DD-description.md` for major changes
+
+**What to Document:**
+
+**1. Code Documentation:**
+```python
+def calculate_leverage(position_size_usd, margin_used):
+    """
+    Calculate position leverage from margin delta.
+    
+    Args:
+        position_size_usd: Position size in USD
+        margin_used: Total margin used for position
+        
+    Returns:
+        float: Leverage multiplier (e.g., 5.0 for 5x leverage)
+        
+    Note:
+        This method works best for new positions. For existing positions
+        opened before tracking started, returns None.
+    """
+```
+
+**2. Database Schema Changes:**
+```python
+# In migration file: db/migrations/add_leverage_column.py
+"""
+Migration: Add leverage column to closed_trades
+
+Date: 2024-01-15
+Author: [Your name]
+
+Changes:
+- Add 'leverage' column to closed_trades table
+- Default value: NULL
+- Type: REAL
+
+Rollback:
+ALTER TABLE closed_trades DROP COLUMN leverage;
+
+Dependencies:
+- None
+
+Testing:
+1. Backup database
+2. Run migration
+3. Verify column exists: sqlite3 data/wallet.db "PRAGMA table_info(closed_trades);"
+"""
+```
+
+**3. Session Notes Template:**
+Create `docs/session-notes/YYYY-MM-DD-feature-name.md`:
+```markdown
+# Session Notes - [Date] - [Feature Name]
+
+## What Changed
+- Added X feature
+- Fixed Y bug
+- Upgraded Z dependency
+
+## What Broke
+- Issue 1: Description and error
+- Issue 2: Description and error
+
+## How It Was Fixed
+- Fix 1: Solution and code reference
+- Fix 2: Solution and code reference
+
+## Testing Performed
+- Tested X scenario: Result
+- Tested Y scenario: Result
+
+## Rollback Steps
+1. Revert commit: `git revert <hash>`
+2. Restore database: `cp data/wallet_backup_YYYYMMDD.db data/wallet.db`
+3. Restart app: `python app.py`
+
+## Notes for Future
+- Gotcha discovered: [description]
+- TODO: [item]
+```
+
+**4. Update Main Documentation:**
+- **New features**: Add to `README.md` Features section
+- **API changes**: Update `docs/GUIDE.md` endpoints section
+- **Configuration**: Update `env.example` and `docs/GUIDE.md` config section
+- **Troubleshooting**: Add common issues to `docs/GUIDE.md`
+
+**Documentation Checklist:**
+- [ ] Code has docstrings
+- [ ] Migration files have rollback instructions
+- [ ] README.md updated if user-facing changes
+- [ ] GUIDE.md updated if API/config changes
+- [ ] Session notes created for major changes
+- [ ] CLAUDE.md updated with new gotchas
+
+## 5. Never Let AI Modify Database Migrations Directly
+**Critical**: Always review and test database migrations manually. One corrupted migration can break production data.
+
+- **Create migration files** with Claude Code, but **review SQL before running**
+- **Test migrations** on a backup database first: `cp data/wallet.db data/wallet_backup_test.db`
+- **Check for missing columns** before querying: Use try/except around queries that reference new columns
+- **Document migration order** in migration files (dependencies, rollback steps)
+
+**Example pattern already in codebase:**
+```python
+try:
+    # Query with new column
+    trades = session.query(ClosedTrade).filter(...).all()
+except OperationalError as e:
+    if 'no such column' in str(e).lower():
+        # Fallback to old query without new column
+        print("Warning: Column not found. Run migration first.")
+```
+
+## 6. Document Platform Gotchas Immediately
+Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
+
+**Known Gotchas:**
+- **SQLAlchemy scoped sessions**: Always use `with get_session() as session:` pattern. Never reuse sessions across requests.
+- **SQLite locking**: Multiple threads writing can cause "database is locked" errors. Use connection pooling carefully.
+- **Flask reloader**: Background threads start twice in debug mode. Use `WERKZEUG_RUN_MAIN` check (already implemented).
+- **CSRF tokens**: Must be included in all POST forms. Use `{{ csrf_token() }}` in templates.
+- **Symbol normalization**: Always normalize symbols before DB operations (`normalize_symbol()`). Different exchanges use different formats (BTC vs BTC-USDT).
+- **Position opened date**: Don't use first-ever position snapshot. Find most recent zero-size → non-zero transition for accurate "time in trade".
+
+## 7. Use Feature Flags for Experimental Code
+Toggle new features on/off without rebuilding. Makes rolling back instant when something breaks.
+
+**Pattern:**
+```python
+# In config.py
+EXPERIMENTAL_LEVERAGE_CALC = os.getenv('EXPERIMENTAL_LEVERAGE_CALC', 'false').lower() == 'true'
+
+# In code
+if app.config.get('EXPERIMENTAL_LEVERAGE_CALC'):
+    # New calculation method
+else:
+    # Old reliable method
+```
+
+**Benefits:**
+- Roll back instantly: Change env var, restart app
+- A/B test new features
+- Gradual rollout to production
+
+## 8. Always Request Debug Logging
+Ask Claude Code to add `app.logger.info()` statements for complex flows. Future you will thank past you when debugging async API calls or position calculations.
+
+**Critical areas needing logging:**
+- API client calls (request/response)
+- Database queries (especially complex joins)
+- Position/leverage calculations
+- Strategy assignment resolution
+- Background logger operations
+
+**Example:**
+```python
+app.logger.info(f"Calculating leverage for {symbol}: position_size={position_size_usd}, margin_used={margin_used}")
+```
+
+## 9. Test After Every Change!!
+**CRITICAL**: Verify changes work before claiming success.
+
+**Checklist:**
+1. **Web server running**: `ps aux | grep app.py` or `curl http://localhost:5000/health`
+2. **Database accessible**: Check `/health` endpoint returns 200
+3. **Background logger**: Check `logs/exchange_traffic.log` for activity
+4. **API endpoints**: Test actual routes (add wallet, view dashboard)
+5. **Database writes**: Verify snapshots are being written (check DB directly)
+6. **No console errors**: Check terminal output for exceptions
+
+**Never assume changes worked without verification.**
+
+## 10. Keep Conversations Focused on Single Components
+Don't ask to "refactor the whole app". Smaller scope = better results.
+
+**Good scopes:**
+- "Add validation to wallet creation form"
+- "Fix position opened date calculation for reopened positions"
+- "Add error handling to Hyperliquid API client"
+
+**Bad scopes:**
+- "Refactor all database queries"
+- "Improve the entire dashboard"
+- "Optimize everything"
+
+## 11. Database Session Management Rules
+**CRITICAL**: SQLAlchemy session handling is easy to break.
+
+**Rules:**
+- **Always use context manager**: `with get_session() as session:`
+- **Never reuse sessions**: Each request gets a new session
+- **Commit explicitly**: `session.commit()` after writes
+- **Rollback on errors**: `session.rollback()` in exception handlers
+- **Close sessions**: `cleanup_session()` is called automatically via `@app.teardown_appcontext`
+
+**Bad pattern:**
+```python
+session = get_session()  # DON'T DO THIS
+# ... use session ...
+session.close()  # Manual cleanup is error-prone
+```
+
+**Good pattern:**
+```python
+with get_session() as session:
+    # ... use session ...
+    session.commit()  # Explicit commit
+# Session automatically cleaned up
+```
+
+## 12. Background Thread Safety
+Background logger runs in a daemon thread. Be careful with shared state.
+
+**Rules:**
+- **Database connections**: Each thread needs its own session
+- **Flask app context**: Background threads don't have Flask request context
+- **Error handling**: Background thread errors won't show in Flask error handlers
+- **Logging**: Use Python logging, not Flask's `app.logger` in background threads
+
+**Current implementation (correct):**
+```python
+if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+    start_background_logger()  # Only start once, not on reloader
+```
+
+## 13. Exchange API Rate Limiting
+Exchange APIs have rate limits. Don't hammer them.
+
+**Rules:**
+- **Add delays**: Use `time.sleep()` between rapid API calls
+- **Cache responses**: Don't fetch same data multiple times per request
+- **Error handling**: Handle 429 (rate limit) errors gracefully
+- **Logging**: Log all API calls to `logs/exchange_traffic.log` (already implemented)
+
+**Pattern:**
+```python
+try:
+    data = client.fetch_positions()
+except RateLimitError:
+    app.logger.warning("Rate limited, backing off...")
+    time.sleep(5)
+    # Retry or return cached data
+```
+
+## 14. Symbol Normalization Consistency
+Different exchanges use different symbol formats. Always normalize.
+
+**Rules:**
+- **Before DB operations**: Always call `normalize_symbol(symbol)`
+- **Before comparisons**: Normalize both sides
+- **Strategy assignments**: Store normalized symbols in database
+- **Display**: Can show original format in UI, but store normalized
+
+**Example:**
+```python
+# Bad
+if symbol == 'BTC-USDT':  # Might not match 'BTCUSDT' or 'BTC_USDT'
+
+# Good
+normalized = normalize_symbol(symbol)
+if normalized == normalize_symbol('BTC-USDT'):
+```
+
+## 15. Encryption Key Management
+Changing encryption keys breaks existing credentials.
+
+**Rules:**
+- **Never change ENCRYPTION_KEY** without re-encrypting all credentials
+- **Backup before key changes**: Users will need to re-enter API keys
+- **Document key rotation**: If rotating keys, provide migration script
+- **Test decryption**: After key changes, verify credentials still decrypt
+
+**If key changes:**
+1. Backup database
+2. Notify users to re-enter credentials
+3. Or: Write migration script to re-encrypt with new key
+
+## 16. Position Calculation Edge Cases
+Position calculations have many edge cases. Handle them explicitly.
+
+**Known edge cases:**
+- **Reopened positions**: Position closed then reopened → find most recent zero→non-zero transition
+- **Multiple positions opened simultaneously**: Margin delta can't be attributed to single position
+- **No historical data**: Can't calculate leverage for positions opened before tracking started
+- **Position size changes**: Adding to position increases margin, but position already exists
+
+**Always:**
+- Log calculation method used (`margin_delta`, `margin_rate`, `unknown`)
+- Provide fallback when calculation fails
+- Document assumptions in code comments
+
+## 17. CSRF Protection Gotchas
+CSRF tokens are required for all POST requests.
+
+**Rules:**
+- **Include in templates**: `{{ csrf_token() }}` in all forms
+- **Exempt when needed**: Use `@csrf.exempt` for API endpoints (sparingly)
+- **Error handling**: CSRF errors return 400, handle gracefully
+- **Testing**: Test forms work with CSRF enabled
+
+**Current implementation:**
+- CSRF enabled by default
+- Admin routes exempted where needed (`@csrf.exempt`)
+- Error handler shows user-friendly message
+
+---
+
+## Quick Reference: Common Commands
+
+**Start app:**
+```bash
+python app.py
+```
+
+**Check if running:**
+```bash
+ps aux | grep app.py
+curl http://localhost:5000/health
+```
+
+**View logs:**
+```bash
+tail -f logs/exchange_traffic.log
+```
+
+**Backup database (ALWAYS before changes):**
+```bash
+cp data/wallet.db data/wallet_backup_$(date +%Y%m%d_%H%M%S).db
+ls -lh data/wallet_backup_*.db  # Verify backup
+```
+
+**Test database:**
+```bash
+sqlite3 data/wallet.db "SELECT COUNT(*) FROM equity_snapshots;"
+```
+
+**Git workflow (before upgrades):**
+```bash
+git checkout main
+git pull
+git checkout -b feature/your-feature-name
+# Make changes, test, commit
+git checkout main
+git merge feature/your-feature-name
+```
+
+**Verify backup integrity:**
+```bash
+sqlite3 data/wallet_backup_YYYYMMDD_HHMMSS.db "PRAGMA integrity_check;"
+```
+
+---
+
+## Session Checklist
+
+Before ending a coding session:
+
+- [ ] Database backed up (if any DB changes)
+- [ ] Changes tested and verified working
+- [ ] Code documented (docstrings, comments)
+- [ ] Documentation updated (README.md, GUIDE.md if needed)
+- [ ] Session notes created (for major changes)
+- [ ] CLAUDE.md updated (if new gotcha discovered)
+- [ ] Git branch created (if upgrade/major change)
+- [ ] No console errors
+- [ ] Health endpoint returns 200
+
+---
+
+**Remember**: Every session should leave the codebase better than it found it. Document gotchas, add logging, test thoroughly, backup before changes, and branch before upgrades.
+
