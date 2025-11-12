@@ -239,6 +239,7 @@ Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 - **CSRF tokens**: Must be included in all POST forms. Use `{{ csrf_token() }}` in templates.
 - **Symbol normalization**: Always normalize symbols before DB operations (`normalize_symbol()`). Different exchanges use different formats (BTC vs BTC-USDT).
 - **Position opened date**: Don't use first-ever position snapshot. Find most recent zero-size → non-zero transition for accurate "time in trade".
+- **Portfolio equity aggregation**: DO NOT filter wallets based on staleness (e.g., no update in 1 hour). This causes artificial dips in equity charts. Wallets are the source of truth - aggregate ALL connected wallets' latest snapshots, no matter the age. Show staleness warnings in UI instead (see `db/queries.py:get_equity_history()`).
 
 ## 7. Use Feature Flags for Experimental Code
 Toggle new features on/off without rebuilding. Makes rolling back instant when something breaks.
@@ -278,13 +279,16 @@ app.logger.info(f"Calculating leverage for {symbol}: position_size={position_siz
 ## 9. Test After Every Change!!
 **CRITICAL**: Verify changes work before claiming success.
 
+**IMPORTANT**: Always test against the actual running server, not localhost. Test URL: **http://91.99.142.197:5000/**
+
 **Checklist:**
-1. **Web server running**: `ps aux | grep app.py` or `curl http://localhost:5000/health`
+1. **Web server running**: `ps aux | grep app.py` or `curl http://91.99.142.197:5000/health`
 2. **Database accessible**: Check `/health` endpoint returns 200
 3. **Background logger**: Check `logs/exchange_traffic.log` for activity
-4. **API endpoints**: Test actual routes (add wallet, view dashboard)
+4. **API endpoints**: Test actual routes at http://91.99.142.197:5000 (add wallet, view dashboard)
 5. **Database writes**: Verify snapshots are being written (check DB directly)
 6. **No console errors**: Check terminal output for exceptions
+7. **Browser inspection**: Use DevTools to inspect rendered HTML/JavaScript
 
 **Never assume changes worked without verification.**
 

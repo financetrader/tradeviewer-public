@@ -31,6 +31,9 @@ class Config:
     # Logging
     ADMIN_LOG_TAIL = int(os.getenv('ADMIN_LOG_TAIL', 200))
 
+    # Portfolio Staleness Warnings
+    STALE_WALLET_HOURS = int(os.getenv('STALE_WALLET_HOURS', 2))  # Show warning if wallet hasn't updated in N hours
+
     # Rate Limiting
     RATELIMIT_STORAGE_URL = 'memory://'
 
