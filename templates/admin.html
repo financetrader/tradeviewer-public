@@ -126,6 +126,7 @@
                             <th>Provider</th>
                             <th>Type</th>
                             <th>Status</th>
+                            <th>Last Known Value</th>
                             <th>Last Test</th>
                             <th>Created</th>
                             <th>Actions</th>
@@ -141,6 +142,15 @@
                                 <span class="badge badge-{{ wallet.status }}">
                                     {{ wallet.status.replace('_', ' ').title() }}
                                 </span>
+                            </td>
+                            <td>
+                                {% if wallet.equity %}
+                                    <span style="color: #00d4ff; font-weight: 600;">
+                                        ${{ "{:,.2f}".format(wallet.equity) }}
+                                    </span>
+                                {% else %}
+                                    <span style="color: #8b92b0; font-style: italic;">-</span>
+                                {% endif %}
                             </td>
                             <td>
                                 {% if wallet.last_test %}

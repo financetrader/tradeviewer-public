@@ -29,6 +29,7 @@ from services.exchange_logging import LOG_PATH
 from db.models import WalletConfig
 from db.models_strategies import Strategy, StrategyAssignment
 from db import queries
+from db.queries import get_latest_equity_per_wallet
 from db.queries_strategies import (
     list_strategies, create_strategy,
     list_assignments, create_assignment, end_assignment, delete_assignment,
@@ -1009,6 +1010,9 @@ def admin():
     """Wallets page for wallet management."""
     with get_session() as session:
         wallets = session.query(WalletConfig).order_by(WalletConfig.created_at.desc()).all()
+        # Get latest equity per wallet
+        portfolio_equity = get_latest_equity_per_wallet(session)
+
         # Convert to list of dictionaries to avoid session issues
         wallets_data = []
         for wallet in wallets:
@@ -1019,8 +1023,10 @@ def admin():
                 'wallet_type': wallet.wallet_type,
                 'status': wallet.status,
                 'last_test': wallet.last_test,
-                'created_at': wallet.created_at
+                'created_at': wallet.created_at,
+                'equity': portfolio_equity.get(wallet.id, 0)
             })
+
     return render_template('admin.html', wallets=wallets_data)
 
 
