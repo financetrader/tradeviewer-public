@@ -277,16 +277,62 @@
             No wallets with trading history found. Trade on your wallets first, or use the form below to manually add a pair.
         </div>
         {% else %}
+        <!-- Filter Toggle Button & Results Counter -->
+        <div style="margin-top: 15px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <button type="button" id="toggleFilterBtn" onclick="toggleFilterPanel()" style="padding: 8px 16px; background: #252b4a; color: #00d4ff; border: 1px solid #252b4a; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">
+                🔍 Show Filters ▼
+            </button>
+            <div style="color: #8b92b0; font-size: 0.9rem;">
+                <span id="resultsCounter">Results: <span id="visibleCount">0</span> assignments</span>
+            </div>
+        </div>
+
+        <!-- Collapsible Filter Panel -->
+        <div id="filterPanel" style="display: none; margin-bottom: 15px; padding: 12px; background: #1a1f3a; border: 1px solid #252b4a; border-radius: 4px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div>
+                    <label style="display: block; color: #8b92b0; font-size: 0.85rem; margin-bottom: 4px;">Wallet</label>
+                    <input type="text" id="filterWallet" placeholder="Search wallet..." onkeyup="applyFilters()" style="width: 100%; padding: 6px; background: #0a0e27; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.85rem;">
+                </div>
+                <div>
+                    <label style="display: block; color: #8b92b0; font-size: 0.85rem; margin-bottom: 4px;">Symbol</label>
+                    <input type="text" id="filterSymbol" placeholder="Search symbol..." onkeyup="applyFilters()" style="width: 100%; padding: 6px; background: #0a0e27; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.85rem;">
+                </div>
+                <div>
+                    <label style="display: block; color: #8b92b0; font-size: 0.85rem; margin-bottom: 4px;">Strategy</label>
+                    <input type="text" id="filterStrategy" placeholder="Search strategy..." onkeyup="applyFilters()" style="width: 100%; padding: 6px; background: #0a0e27; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.85rem;">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                <div>
+                    <label style="display: block; color: #8b92b0; font-size: 0.85rem; margin-bottom: 4px;">Min Trades</label>
+                    <input type="number" id="filterTradesMin" placeholder="0" min="0" onchange="applyFilters()" style="width: 100%; padding: 6px; background: #0a0e27; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.85rem;">
+                </div>
+                <div>
+                    <label style="display: block; color: #8b92b0; font-size: 0.85rem; margin-bottom: 4px;">Max Trades</label>
+                    <input type="number" id="filterTradesMax" placeholder="1000" min="0" onchange="applyFilters()" style="width: 100%; padding: 6px; background: #0a0e27; border: 1px solid #252b4a; border-radius: 4px; color: #fff; font-size: 0.85rem;">
+                </div>
+                <div style="display: flex; gap: 8px; align-items: flex-end;">
+                    <button type="button" onclick="resetFilters()" style="flex: 1; padding: 6px 12px; background: #252b4a; color: #00d4ff; border: 1px solid #252b4a; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                        Reset Filters
+                    </button>
+                    <button type="button" onclick="toggleFilterPanel()" style="flex: 1; padding: 6px 12px; background: #252b4a; color: #00d4ff; border: 1px solid #252b4a; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+                        Hide Filters ▲
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div style="overflow-x: auto;">
-            <table style="margin-top:15px; min-width: 100%;">
+            <table style="margin-top:0px; min-width: 100%;">
                 <thead>
                     <tr>
-                        <th style="position: sticky; left: 0; background:#1a1f3a; z-index: 2;">Wallet</th>
-                        <th style="width: 120px;">Value</th>
-                        <th style="min-width: 200px;">Symbol / Notes</th>
-                        <th>Strategy</th>
-                        <th style="width: 120px;">Trades</th>
-                        <th style="width: 140px;">Last Modified</th>
+                        <th style="position: sticky; left: 0; background:#1a1f3a; z-index: 2; cursor: pointer; user-select: none;" onclick="toggleSort('wallet')">Wallet <span class="sort-indicator" data-column="wallet">↕</span></th>
+                        <th style="width: 120px; cursor: pointer; user-select: none;" onclick="toggleSort('value')">Value <span class="sort-indicator" data-column="value">↕</span></th>
+                        <th style="min-width: 200px; cursor: pointer; user-select: none;" onclick="toggleSort('symbol')">Symbol / Notes <span class="sort-indicator" data-column="symbol">↕</span></th>
+                        <th style="cursor: pointer; user-select: none;" onclick="toggleSort('strategy')">Strategy <span class="sort-indicator" data-column="strategy">↕</span></th>
+                        <th style="width: 120px; cursor: pointer; user-select: none; text-align: center;" onclick="toggleSort('trades')">Trades <span class="sort-indicator" data-column="trades">↕</span></th>
+                        <th style="width: 140px; cursor: pointer; user-select: none;" onclick="toggleSort('modified')">Last Modified <span class="sort-indicator" data-column="modified">↕</span></th>
                         <th style="width: 200px;">Action</th>
                     </tr>
                 </thead>
@@ -294,11 +340,11 @@
                     {% for row in matrix_data %}
                         {% if row.symbols|length > 0 %}
                             {% for symbol_data in row.symbols %}
-                            <tr class="pair-row {{ 'inactive-pair' if not symbol_data.is_current else '' }}" data-is-current="{{ symbol_data.is_current|lower }}">
+                            <tr class="pair-row {{ 'inactive-pair' if not symbol_data.is_current else '' }}" data-is-current="{{ symbol_data.is_current|lower }}" data-wallet="{{ row.wallet_name }}" data-symbol="{{ symbol_data.symbol }}" data-strategy="{{ symbol_data.strategy_name or '' }}" data-trades="{{ symbol_data.trade_count }}" data-modified="{{ symbol_data.modified_at.isoformat() if symbol_data.modified_at else '' }}">
                                 <td style="position: sticky; left: 0; background:#1a1f3a; font-weight: 600;">
                                     {{ row.wallet_name }}
                                 </td>
-                                <td>
+                                <td data-value="{{ row.equity or 0 }}">
                                     {% if row.equity %}
                                         <span style="color: #00d4ff; font-weight: 600;">
                                             ${{ "{:,.2f}".format(row.equity) }}
@@ -564,7 +610,168 @@
             fetchSymbolSuggestions().then(() => {
                 addPairRow();
             });
+            // Initialize filter/sort functionality
+            updateResultsCounter();
         });
+
+        // ===== TABLE FILTERING & SORTING FUNCTIONS =====
+        let currentSort = { column: null, direction: 'asc' };
+
+        function toggleFilterPanel() {
+            const filterPanel = document.getElementById('filterPanel');
+            const toggleBtn = document.getElementById('toggleFilterBtn');
+            const isHidden = filterPanel.style.display === 'none';
+
+            if (isHidden) {
+                filterPanel.style.display = 'block';
+                toggleBtn.innerHTML = '🔍 Hide Filters ▲';
+            } else {
+                filterPanel.style.display = 'none';
+                toggleBtn.innerHTML = '🔍 Show Filters ▼';
+            }
+        }
+
+        function applyFilters() {
+            const walletFilter = document.getElementById('filterWallet').value.toLowerCase();
+            const symbolFilter = document.getElementById('filterSymbol').value.toLowerCase();
+            const strategyFilter = document.getElementById('filterStrategy').value.toLowerCase();
+            const tradesMin = parseInt(document.getElementById('filterTradesMin').value) || 0;
+            const tradesMax = parseInt(document.getElementById('filterTradesMax').value) || Infinity;
+
+            const rows = document.querySelectorAll('tbody tr.pair-row');
+            let visibleCount = 0;
+
+            rows.forEach(row => {
+                const wallet = row.dataset.wallet.toLowerCase();
+                const symbol = row.dataset.symbol.toLowerCase();
+                const strategy = row.dataset.strategy.toLowerCase();
+                const trades = parseInt(row.dataset.trades);
+
+                const walletMatch = wallet.includes(walletFilter);
+                const symbolMatch = symbol.includes(symbolFilter);
+                const strategyMatch = strategy.includes(strategyFilter);
+                const tradesMatch = trades >= tradesMin && trades <= tradesMax;
+
+                if (walletMatch && symbolMatch && strategyMatch && tradesMatch) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            updateResultsCounter(visibleCount);
+        }
+
+        function resetFilters() {
+            document.getElementById('filterWallet').value = '';
+            document.getElementById('filterSymbol').value = '';
+            document.getElementById('filterStrategy').value = '';
+            document.getElementById('filterTradesMin').value = '';
+            document.getElementById('filterTradesMax').value = '';
+
+            currentSort = { column: null, direction: 'asc' };
+            updateSortIndicators();
+
+            applyFilters();
+        }
+
+        function toggleSort(column) {
+            // Determine new sort direction
+            if (currentSort.column === column) {
+                // Toggle direction for same column
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to ascending
+                currentSort.column = column;
+                currentSort.direction = 'asc';
+            }
+
+            sortTable();
+            updateSortIndicators();
+        }
+
+        function sortTable() {
+            if (!currentSort.column) return;
+
+            const rows = Array.from(document.querySelectorAll('tbody tr.pair-row'));
+            const tbody = document.querySelector('tbody');
+
+            rows.sort((a, b) => {
+                let aVal, bVal;
+
+                switch (currentSort.column) {
+                    case 'wallet':
+                        aVal = a.dataset.wallet.toLowerCase();
+                        bVal = b.dataset.wallet.toLowerCase();
+                        break;
+                    case 'value':
+                        aVal = parseFloat(a.querySelector('td[data-value]')?.dataset.value) || 0;
+                        bVal = parseFloat(b.querySelector('td[data-value]')?.dataset.value) || 0;
+                        break;
+                    case 'symbol':
+                        aVal = a.dataset.symbol.toLowerCase();
+                        bVal = b.dataset.symbol.toLowerCase();
+                        break;
+                    case 'strategy':
+                        aVal = a.dataset.strategy.toLowerCase();
+                        bVal = b.dataset.strategy.toLowerCase();
+                        break;
+                    case 'trades':
+                        aVal = parseInt(a.dataset.trades) || 0;
+                        bVal = parseInt(b.dataset.trades) || 0;
+                        break;
+                    case 'modified':
+                        aVal = a.dataset.modified || '';
+                        bVal = b.dataset.modified || '';
+                        break;
+                    default:
+                        return 0;
+                }
+
+                // Handle string comparison
+                if (typeof aVal === 'string') {
+                    return currentSort.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                }
+
+                // Handle numeric comparison
+                return currentSort.direction === 'asc' ? aVal - bVal : bVal - aVal;
+            });
+
+            // Re-append sorted rows
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        function updateSortIndicators() {
+            document.querySelectorAll('.sort-indicator').forEach(indicator => {
+                const column = indicator.dataset.column;
+                if (column === currentSort.column) {
+                    indicator.textContent = currentSort.direction === 'asc' ? '↑' : '↓';
+                    indicator.style.color = '#00d4ff';
+                } else {
+                    indicator.textContent = '↕';
+                    indicator.style.color = '#8b92b0';
+                }
+            });
+        }
+
+        function updateResultsCounter(visibleCount = null) {
+            if (visibleCount === null) {
+                const rows = document.querySelectorAll('tbody tr.pair-row');
+                visibleCount = Array.from(rows).filter(row => row.style.display !== 'none').length;
+            }
+
+            const totalCount = document.querySelectorAll('tbody tr.pair-row').length;
+            const counter = document.getElementById('visibleCount');
+
+            if (visibleCount === totalCount) {
+                counter.textContent = totalCount;
+                document.getElementById('resultsCounter').innerHTML = `Results: <span id="visibleCount">${totalCount}</span> assignments`;
+            } else {
+                counter.textContent = visibleCount;
+                document.getElementById('resultsCounter').innerHTML = `Results: <span id="visibleCount">${visibleCount}</span> assignments (filtered from ${totalCount})`;
+            }
+        }
         </script>
     </div>
 
