@@ -290,13 +290,15 @@ For Hyperliquid with 10x leverage on 10 ETH @ $2,000:
 - `logger.py` (lines 70-122) - Background logger that fetches positions and calculates leverage
 - `services/sync_service.py` (lines 12-56) - Syncs closed trades, looks up leverage
 - `db/queries.py` (lines 322-359) - `get_leverage_at_timestamp()` function
-- `utils/calculations.py` (lines 69-144) - `estimate_leverage_hyperliquid()` function
 
-**Exchange-Specific**:
-- `services/apex_leverage_calculator.py` - Apex margin delta calculations
+**Exchange-Specific (Margin Delta Tracking)**:
+- `services/apex_leverage_calculator.py` - Apex Omni margin delta calculations
 - `services/hyperliquid_leverage_calculator.py` - Hyperliquid margin delta calculations
 - `services/hyperliquid_client.py` - Hyperliquid API client
 - `services/apex_omni_client.py` - Apex Omni API client
+
+**Deprecated (Old Estimation Method)**:
+- `utils/calculations.py` (lines 69-144) - `estimate_leverage_hyperliquid()` function - NO LONGER USED for new positions
 
 **Models & Migrations**:
 - `db/models.py` - Database models with `leverage`, `equity_used`, `calculation_method` fields

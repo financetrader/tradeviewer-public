@@ -242,11 +242,10 @@ When you open a new Hyperliquid position:
 
 ## Related Documentation
 
-- [APEX_LEVERAGE_CALCULATION.md](./APEX_LEVERAGE_CALCULATION.md) - Original implementation
-- [LEVERAGE_CALCULATION_STRATEGY.md](./LEVERAGE_CALCULATION_STRATEGY.md) - General strategy
-- [HYPERLIQUID_LEVERAGE_CALCULATION.md](./HYPERLIQUID_LEVERAGE_CALCULATION.md) - Old estimation method (deprecated)
+- [LEVERAGE_CALCULATION.md](./LEVERAGE_CALCULATION.md) - Primary consolidated reference for all exchanges
+- [APEX_LEVERAGE_CALCULATION.md](./APEX_LEVERAGE_CALCULATION.md) - Apex Omni margin delta implementation
 
-## Migration from Old Method
+## Note on Previous Implementation
 
-The old estimation-based method is now deprecated. New installations will use margin delta tracking automatically. Existing positions calculated with the old method will keep their estimated leverage until they are closed and reopened.
+The old estimation-based method (with 0.6, 0.8 percentage assumptions) has been removed. New installations use margin delta tracking. Existing positions calculated with the old method will keep their estimated leverage until they are closed and reopened.
 

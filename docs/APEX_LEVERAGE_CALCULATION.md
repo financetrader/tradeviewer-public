@@ -235,6 +235,6 @@ grep "Margin calculation" logs/app.log
 
 ## Related Documentation
 
-- [LEVERAGE_CALCULATION_STRATEGY.md](./LEVERAGE_CALCULATION_STRATEGY.md) - General approach for all exchanges
-- [HYPERLIQUID_LEVERAGE_CALCULATION.md](./HYPERLIQUID_LEVERAGE_CALCULATION.md) - Hyperliquid-specific approach
+- [LEVERAGE_CALCULATION.md](./LEVERAGE_CALCULATION.md) - Primary consolidated reference for all exchanges
+- [HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md](./HYPERLIQUID_LEVERAGE_MARGIN_DELTA.md) - Hyperliquid implementation
 
