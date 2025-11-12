@@ -287,6 +287,29 @@ python app.py
 - PnL charts: extend horizontally to now when there are no recent closed trades (flat line = no change)
 - Symbol normalization: symbols are stored as dashed pairs (e.g., `BTC-USDT`, `ETH-USDC`) to avoid duplicates
 
+### Wallet Staleness Warnings
+
+**Important**: Wallets are the source of truth. The dashboard aggregates ALL connected wallets' data, regardless of how recently they updated. Staleness is displayed as a warning, not by hiding data.
+
+**Staleness Behavior:**
+- **Threshold**: Configurable via `STALE_WALLET_HOURS` environment variable (default: 2 hours)
+- **Display**: Each wallet shows "Last updated: X minutes/hours ago" in the portfolio table
+- **Warning**: If a wallet hasn't updated in >threshold hours, a warning indicator appears
+- **Portfolio Total**: Includes stale wallets (they are still valid data, just old)
+- **No Gaps**: Unlike missing data periods, stale wallet data does NOT create gaps in the equity chart
+
+**Example:**
+```bash
+# Show warning if wallet is older than 4 hours
+STALE_WALLET_HOURS=4 python app.py
+```
+
+**Why This Design?**
+- Wallets are the ultimate source of truth for portfolio equity
+- Filtering out stale data would create artificial dips in equity charts
+- Better UX: show stale data with a warning than hide it from users
+- Users can see if a wallet is disconnected and take action
+
 ## Notes
 - If you hit a dependency import error, run the `pip install` line shown in Quick start; versions are pinned in `requirements.txt`.
 - To switch between mainnet and testnet, set `APEX_NETWORK` accordingly.
