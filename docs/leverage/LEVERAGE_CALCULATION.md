@@ -1,6 +1,13 @@
 # Leverage Calculation Guide
 
-**Status**: Margin delta tracking implemented for Apex Omni in both logger and dashboard. Hyperliquid margin delta implemented in dashboard (`wallet_dashboard()` route). ISSUE: Hyperliquid background logger still uses old estimation method - should be updated to use margin delta like dashboard does.
+**Status**: Margin delta tracking IS the correct/only method. Should be used consistently everywhere.
+
+**Current Inconsistencies**:
+- ⚠️ app.py line 510-515: Still uses old `estimate_leverage_hyperliquid()` for temporary API display
+- ⚠️ logger.py line 81-86: Still uses old `estimate_leverage_hyperliquid()`
+- ✅ app.py line 839-863: Uses margin delta (CORRECT - but incomplete)
+
+**All old estimation code should be removed and replaced with margin delta everywhere.**
 
 ## Overview
 
@@ -28,29 +35,27 @@ Takes leverage from primary fill's ClosedTrade
 
 **Key Distinction**: Leverage is displayed on open positions as soon as it's calculated (stored in position_snapshots). It's not waiting until the trade closes - it's available for the entire duration the position is open.
 
-## Data Flow
+## Data Flow (Ideal - All Margin Delta)
 
 ### Step 1: Position Opens
 User opens a position on the exchange.
 
-### Step 2: Leverage Calculation & Logging
-Two pathways calculate and store leverage:
+### Step 2: Leverage Calculation (Margin Delta Method)
+When positions are logged/monitored:
 
-**Dashboard View** (when user loads wallet page):
-- **File**: `app.py` lines 769-865 (`wallet_dashboard()` function)
-- Fetches positions and balance data
-- **For Apex Omni**: Calls `calculate_leverage_from_margin_delta()` (margin delta method)
-- **For Hyperliquid**: Calls `calculate_leverage_from_margin_delta()` (margin delta method)
-- Writes fresh equity snapshot and position snapshot with calculated leverage
-- This is the **primary/most accurate** leverage calculation path
+**Dashboard** (`app.py` lines 839-863):
+- Calls `calculate_leverage_from_margin_delta()` for both Apex and Hyperliquid (CORRECT)
+- Calculates and stores in position_snapshots
 
-**Background Logger** (every 30 minutes):
-- **File**: `logger.py` lines 25-122 (`log_positions_for_all_wallets()` function)
-- **For Apex Omni**: Does NOT calculate leverage (no leverage field stored)
-- **For Hyperliquid**: Calls `estimate_leverage_hyperliquid()` (OLD estimation method - 0.6/0.8 ratios)
-- **NOTE**: Hyperliquid logger should use margin delta like dashboard does (issue to fix)
+**Background Logger** (`logger.py` lines 25-122):
+- **Should**: Call `calculate_leverage_from_margin_delta()` for both exchanges
+- **Currently**: Uses old `estimate_leverage_hyperliquid()` for Hyperliquid (NEEDS FIXING)
 
-Result: Position snapshots are created with leverage when either dashboard is loaded or logger runs.
+### Current Issues (Inconsistencies to Remove)
+1. **app.py lines 500-515**: Uses old `estimate_leverage_hyperliquid()` for temp API display (REMOVE)
+2. **logger.py lines 81-86**: Uses old `estimate_leverage_hyperliquid()` (REPLACE with margin delta)
+
+Result: Once fixed, ALL leverage will use margin delta consistently.
 
 ### Step 3: Position Closes
 User closes the position on the exchange. Trade is executed immediately.
@@ -296,22 +301,21 @@ For Hyperliquid with 10x leverage on 10 ETH @ $2,000:
 
 ## Related Files & Implementation
 
-**Dashboard Leverage Calculation** (Primary - Margin Delta):
-- `app.py` (lines 769-865 in `wallet_dashboard()`) - Dashboard calculates leverage for both exchanges
-- `services/apex_leverage_calculator.py` - Apex Omni margin delta calculations
-- `services/hyperliquid_leverage_calculator.py` - Hyperliquid margin delta calculations
+**Margin Delta Implementation** (CORRECT - Use everywhere):
+- `services/apex_leverage_calculator.py` - Apex margin delta logic
+- `services/hyperliquid_leverage_calculator.py` - Hyperliquid margin delta logic
 
-**Background Logger** (Secondary - Inconsistent):
-- `logger.py` (lines 25-122 in `log_positions_for_all_wallets()`)
-  - Apex Omni: No leverage calculation
-  - Hyperliquid: Uses old estimation method (NOT margin delta)
+**Current Usage of Margin Delta** (CORRECT):
+- `app.py` lines 839-863 - Dashboard position snapshot storage
 
-**Trade Synchronization**:
+**Deprecated Code - Should Be Removed** (NEEDS CLEANUP):
+- `utils/calculations.py` lines 69-144 - `estimate_leverage_hyperliquid()` - OLD estimation method
+  - Used in `app.py` lines 500-515 (temp display - REMOVE)
+  - Used in `logger.py` lines 81-86 (background logging - REPLACE with margin delta)
+
+**Trade Synchronization** (Stays same):
 - `services/sync_service.py` (lines 12-56) - Syncs closed trades, looks up leverage
 - `db/queries.py` (lines 322-359) - `get_leverage_at_timestamp()` function
-
-**Deprecated - Still Active** (Should be removed/replaced):
-- `utils/calculations.py` (lines 69-144) - `estimate_leverage_hyperliquid()` function - Used in logger.py for Hyperliquid (OLD estimation method)
 
 **Models & Migrations**:
 - `db/models.py` - Database models with `leverage`, `equity_used`, `calculation_method` fields
@@ -338,15 +342,21 @@ For detailed implementation specifics by exchange:
 
 ## Summary
 
-**Current Implementation Status:**
-- ✅ **Leverage is calculated** using margin delta when dashboard is loaded (for both Apex and Hyperliquid)
-- ✅ **Leverage is DISPLAYED** immediately on dashboard (available for entire duration position is open)
-- ✅ **Leverage is STORED** in `closed_trades` when trade closes (retrieved from position_snapshots)
-- ⚠️ **Background logger** inconsistent: Apex skips leverage, Hyperliquid uses old estimation method
-- ✅ **Dashboard is primary source** for accurate margin delta leverages
-- ✅ **Calculation method tracked** in `calculation_method` field for debugging
+**Correct Method**: Margin delta tracking - leverage calculated once at position open
 
-**Issues to Address:**
-1. Hyperliquid background logger should use margin delta method like the dashboard does
-2. Apex Omni background logger should calculate leverage like the dashboard does
-3. Remove dependency on old `estimate_leverage_hyperliquid()` once logger is updated
+**What Should Happen (Target State)**:
+- ✅ All leverage calculations use margin delta method
+- ✅ Leverage calculated when position opens and stored in position_snapshots
+- ✅ Leverage displayed immediately on dashboard
+- ✅ Leverage retrieved from position_snapshots when trade closes
+- ✅ Consistent behavior everywhere (dashboard, logger, API)
+
+**What's Wrong Now (Cleanup Needed)**:
+1. ❌ app.py lines 500-515: Uses old `estimate_leverage_hyperliquid()` for temp display
+2. ❌ logger.py lines 81-86: Uses old `estimate_leverage_hyperliquid()` for Hyperliquid
+3. ❌ `utils/calculations.py`: Still contains deprecated `estimate_leverage_hyperliquid()` function
+
+**Action Items**:
+1. Remove old estimation code from app.py line 500-515
+2. Replace logger.py line 81-86 with `calculate_leverage_from_margin_delta()`
+3. Delete deprecated `estimate_leverage_hyperliquid()` function from utils/calculations.py

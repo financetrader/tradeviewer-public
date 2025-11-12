@@ -2,11 +2,15 @@
 
 ## Overview
 
-Hyperliquid leverage **can be** calculated using the **margin delta tracking** approach, identical to the Apex Omni implementation. This provides accurate per-position leverage for new positions.
+Hyperliquid leverage **SHOULD** be calculated using the **margin delta tracking** approach, identical to the Apex Omni implementation. This provides accurate per-position leverage for all positions.
 
-**Current Implementation Status:**
-- ✅ **Dashboard** (`app.py` lines 839-863): Uses margin delta tracking
-- ❌ **Background Logger** (`logger.py` lines 78-86): Still uses old estimation method (should be updated)
+**Implementation Status:**
+- ✅ **Margin delta method** implemented in `services/hyperliquid_leverage_calculator.py`
+- ✅ **Dashboard** (`app.py` lines 839-863): Uses margin delta correctly
+- ❌ **Background Logger** (`logger.py` lines 81-86): Uses old estimation - needs to be replaced
+- ❌ **Temp API display** (`app.py` lines 500-515): Uses old estimation - should be removed
+
+**All should use margin delta for consistency.**
 
 ## Key Discovery
 
@@ -270,14 +274,16 @@ When you open a new Hyperliquid position:
 
 ## Implementation Notes
 
-**Margin Delta is Primary Method** (Dashboard):
-- ✅ Dashboard uses margin delta tracking for accurate leverage calculation
+**Margin Delta is the ONLY method to use** (correct approach):
+- ✅ Implemented in `services/hyperliquid_leverage_calculator.py`
 - ✅ Only calculates for NEW positions (detects via first snapshot with size > 0)
 - ✅ Fallback: "unknown" if no previous `totalMarginUsed` snapshot exists
+- ✅ Used correctly in dashboard (`app.py` lines 839-863)
 
-**Old Estimation Method (Background Logger - Active but should be replaced)**:
-- ⚠️ Logger still uses old estimation method with 0.6/0.8 ratios
-- ⚠️ Should be updated to use margin delta like dashboard does
-- ❌ Not as accurate as margin delta method
-- Will be kept for backward compatibility until logger is updated
+**Old Estimation Method - DEPRECATED** (needs removal):
+- ❌ Still in `utils/calculations.py` as `estimate_leverage_hyperliquid()`
+- ❌ Still used in `logger.py` lines 81-86
+- ❌ Still used in `app.py` lines 500-515 for temp display
+- ❌ Not accurate - uses 0.6/0.8 ratio assumptions
+- Should be completely removed once replaced with margin delta everywhere
 
