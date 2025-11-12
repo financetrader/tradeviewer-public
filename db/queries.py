@@ -359,6 +359,93 @@ def get_leverage_at_timestamp(
     return None
 
 
+def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None, wallet_id: Optional[int] = None) -> List[ClosedTradeDict]:
+    """
+    Get closed trades history using aggregated_trades table.
+
+    Exchange APIs return individual fills. This function queries aggregated_trades which
+    groups fills by (wallet_id, timestamp, symbol) for cleaner display.
+
+    Args:
+        session: Database session
+        symbol: Optional symbol filter
+        wallet_id: Optional wallet ID to filter by
+
+    Returns:
+        List of closed trade dicts with strategy_name field
+    """
+    from db.models import AggregatedTrade, WalletConfig
+    from db.models_strategies import Strategy
+    from sqlalchemy.exc import OperationalError
+
+    def _normalize_side(raw: Optional[str]) -> str:
+        s = str(raw or '').lower()
+        if s in ('b', 'bid', 'buy', 'long'):
+            return 'buy'
+        if s in ('a', 'ask', 'sell', 'short'):
+            return 'sell'
+        return s or 'buy'
+
+    try:
+        # Query aggregated_trades instead of closed_trades
+        query = (
+            session.query(AggregatedTrade, Strategy.name, WalletConfig.name)
+            .outerjoin(Strategy, AggregatedTrade.strategy_id == Strategy.id)
+            .outerjoin(WalletConfig, AggregatedTrade.wallet_id == WalletConfig.id)
+            .order_by(desc(AggregatedTrade.timestamp))
+        )
+
+        if wallet_id:
+            query = query.filter(AggregatedTrade.wallet_id == wallet_id)
+
+        if symbol:
+            query = query.filter(AggregatedTrade.symbol == symbol)
+
+        trades = query.all()
+
+    except OperationalError:
+        # aggregated_trades table doesn't exist yet - fall back to closed_trades
+        app.logger.warning("aggregated_trades table not found, falling back to get_closed_trades")
+        return get_closed_trades(session, symbol=symbol, wallet_id=wallet_id)
+
+    # Convert aggregated trades to result dicts
+    results = []
+    for agg_trade, strategy_name, wallet_name in trades:
+        side_norm = _normalize_side(agg_trade.side)
+        trade_type_norm = _normalize_side(agg_trade.trade_type)
+
+        leverage = None
+        try:
+            leverage = float(agg_trade.leverage) if agg_trade.leverage is not None else None
+        except (AttributeError, TypeError):
+            leverage = None
+
+        results.append({
+            'timestamp': agg_trade.timestamp,
+            'createdAtFormatted': agg_trade.timestamp.strftime("%Y-%m-%d %H:%M"),
+            'side': side_norm,
+            'symbol': normalize_symbol(str(agg_trade.symbol)),
+            'size': agg_trade.size,
+            'price': agg_trade.avg_entry_price,
+            'entryPrice': agg_trade.avg_entry_price,
+            'exitPrice': agg_trade.avg_exit_price,
+            'tradeType': trade_type_norm,
+            'totalPnl': agg_trade.total_pnl,
+            'closedPnl': agg_trade.total_pnl,
+            'closeFee': agg_trade.total_close_fee,
+            'openFee': agg_trade.total_open_fee,
+            'liquidateFee': agg_trade.total_liquidate_fee,
+            'exitType': agg_trade.exit_type,
+            'equityUsed': agg_trade.equity_used or 0.0,
+            'leverage': leverage,
+            'strategy_name': strategy_name,
+            'wallet_id': agg_trade.wallet_id,
+            'wallet_name': wallet_name,
+        })
+
+    return results
+
+
 def get_closed_trades(session: Session, symbol: Optional[str] = None, wallet_id: Optional[int] = None) -> List[ClosedTradeDict]:
     """
     Get closed trades history with strategy names.

@@ -905,16 +905,9 @@ def wallet_dashboard(wallet_id):
             # Build symbol PnL from database (closed trades)
             symbol_data = get_symbol_pnl_data(session, wallet_id=wallet_id)
 
-            # NEW: fetch closed trades for the Closed P&L table
-            closed_trades = queries.get_closed_trades(session, wallet_id=wallet_id)
-
-            # Populate strategy names for closed trades
-            for trade in closed_trades:
-                if trade.get('strategy_id'):
-                    strategy = session.query(Strategy).filter(Strategy.id == trade['strategy_id']).first()
-                    trade['strategy_name'] = strategy.name if strategy else None
-                else:
-                    trade['strategy_name'] = None
+            # NEW: fetch aggregated closed trades for the Closed P&L table
+            # This uses aggregated_trades which groups fills by (wallet_id, timestamp, symbol)
+            closed_trades = queries.get_aggregated_closed_trades(session, wallet_id=wallet_id)
         
         # Get current timestamp
         last_update = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
