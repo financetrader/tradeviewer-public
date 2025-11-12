@@ -96,12 +96,14 @@ def make_client(log_requests: bool = False) -> HttpPrivate_v3:
             APEX_OMNI_HTTP_TEST,
             network_id=NETWORKID_TEST,
             api_key_credentials={"key": key, "secret": secret, "passphrase": passphrase},
+            request_timeout=30,  # Increased from 10s to allow for paginated requests
         )
     else:
         base = HttpPrivate_v3(
             APEX_OMNI_HTTP_MAIN,
             network_id=NETWORKID_OMNI_MAIN_ARB,
             api_key_credentials={"key": key, "secret": secret, "passphrase": passphrase},
+            request_timeout=30,  # Increased from 10s to allow for paginated requests
         )
     return LoggingApexClient(base) if log_requests else base
 
