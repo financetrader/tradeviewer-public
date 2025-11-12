@@ -502,18 +502,24 @@ def wallet_dashboard(wallet_id):
                 size = float(p.get('quantity') or 0)
                 entry_price = float(p.get('price') or 0)
                 position_size_usd = abs(size * entry_price)
-                position_value = float(p.get('position_value', 0) or 0)
-                
-                # Calculate leverage for Hyperliquid positions
+
+                # Calculate leverage for Hyperliquid positions using margin delta
                 leverage = None
-                if account_equity and account_equity > 0 and position_size_usd > 0:
-                    from utils.calculations import estimate_leverage_hyperliquid
-                    leverage = estimate_leverage_hyperliquid(
-                        position_size_usd=position_size_usd,
-                        account_equity=account_equity,
-                        position_value=position_value if position_value > 0 else None
-                    )
-                
+                equity_used = None
+                calculation_method = 'unknown'
+
+                if position_size_usd > 0:
+                    # Use margin delta method (same as logger and database storage)
+                    # For display purposes, we calculate this using the current margin data
+                    # The actual persisted leverage in the database comes from position_snapshots
+                    with get_session() as session:
+                        from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta as hl_calc_leverage
+                        from datetime import datetime
+                        leverage, equity_used, calculation_method = hl_calc_leverage(
+                            session, wallet_id, p.get('asset', ''),
+                            position_size_usd, total_margin_used, datetime.utcnow()
+                        )
+
                 hl_positions.append({
                     'symbol': p.get('asset', ''),
                     'side': p.get('side', ''),
@@ -523,8 +529,9 @@ def wallet_dashboard(wallet_id):
                     'leverage': leverage,
                     'unrealizedPnl': float(p.get('unrealized_pnl') or 0),
                     'fundingFee': None,
-                    'equityUsed': None,
+                    'equityUsed': equity_used,
                     'positionSizeUsd': position_size_usd,
+                    'calculationMethod': calculation_method,
                 })
             
             # Add openedFormatted and timeInTrade for Hyperliquid positions

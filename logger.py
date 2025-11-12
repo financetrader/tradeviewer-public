@@ -67,22 +67,28 @@ def log_positions_for_all_wallets():
                             except Exception as e:
                                 print(f"Warning: Failed to fetch balances for leverage calculation: {e}")
                         
+                        # Get clearinghouse state for margin data
+                        clearinghouse_state = client.fetch_clearinghouse_state()
+                        margin_summary = clearinghouse_state.get('marginSummary', {})
+                        current_margin_used = float(margin_summary.get('totalMarginUsed', 0) or 0)
+
                         # Map to standard format and calculate leverage
                         positions = []
                         for p in positions_raw:
                             size = float(p.get('quantity') or 0)
                             entry_price = float(p.get('price') or 0)
                             position_size_usd = abs(size * entry_price)
-                            position_value = float(p.get('position_value', 0) or 0)
-                            
-                            # Calculate leverage for Hyperliquid positions
+
+                            # Calculate leverage for Hyperliquid positions using margin delta
                             leverage = None
-                            if account_equity and account_equity > 0 and position_size_usd > 0:
-                                from utils.calculations import estimate_leverage_hyperliquid
-                                leverage = estimate_leverage_hyperliquid(
-                                    position_size_usd=position_size_usd,
-                                    account_equity=account_equity,
-                                    position_value=position_value if position_value > 0 else None
+                            equity_used = None
+                            calculation_method = 'unknown'
+
+                            if position_size_usd > 0:
+                                from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta
+                                leverage, equity_used, calculation_method = calculate_leverage_from_margin_delta(
+                                    session, wallet_id, p.get('asset', ''),
+                                    position_size_usd, current_margin_used, timestamp_dt
                                 )
                             
                             positions.append({
@@ -94,8 +100,9 @@ def log_positions_for_all_wallets():
                                 'leverage': leverage,
                                 'unrealizedPnl': float(p.get('unrealized_pnl') or 0),
                                 'fundingFee': None,
-                                'equityUsed': None,
+                                'equityUsed': equity_used,
                                 'positionSizeUsd': position_size_usd,
+                                'calculationMethod': calculation_method,
                             })
                     else:
                         continue
@@ -118,6 +125,7 @@ def log_positions_for_all_wallets():
                                     'unrealized_pnl': float(pos.get('unrealizedPnl', 0) or 0),
                                     'funding_fee': float(pos.get('fundingFee', 0) or 0),
                                     'equity_used': float(pos.get('equityUsed', 0)) if pos.get('equityUsed') else None,
+                                    'calculation_method': pos.get('calculationMethod', 'unknown'),
                                 }
                                 queries.insert_position_snapshot(session, position_data)
                                 total_positions_logged += 1
