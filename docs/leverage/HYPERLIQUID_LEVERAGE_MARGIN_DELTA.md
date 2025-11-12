@@ -2,15 +2,15 @@
 
 ## Overview
 
-Hyperliquid leverage **SHOULD** be calculated using the **margin delta tracking** approach, identical to the Apex Omni implementation. This provides accurate per-position leverage for all positions.
+Hyperliquid leverage is calculated using the **margin delta tracking** approach, identical to the Apex Omni implementation. This provides accurate per-position leverage for all positions.
 
-**Implementation Status:**
+**Implementation Status**: ✅ **COMPLETE**
 - ✅ **Margin delta method** implemented in `services/hyperliquid_leverage_calculator.py`
-- ✅ **Dashboard** (`app.py` lines 839-863): Uses margin delta correctly
-- ❌ **Background Logger** (`logger.py` lines 81-86): Uses old estimation - needs to be replaced
-- ❌ **Temp API display** (`app.py` lines 500-515): Uses old estimation - should be removed
+- ✅ **Dashboard** (`app.py` lines 506-535): Uses margin delta for position display
+- ✅ **Dashboard** (`app.py` lines 839-863): Uses margin delta for position snapshots
+- ✅ **Background Logger** (`logger.py` lines 70-92): Uses margin delta for position logging
 
-**All should use margin delta for consistency.**
+**All components now use margin delta consistently.**
 
 ## Key Discovery
 
@@ -104,22 +104,27 @@ Uses the same schema as Apex:
    )
    ```
 
-### Legacy Code Flow (Background Logger - Deprecated)
+### Current Implementation (Background Logger)
 
-**File**: `logger.py` lines 78-86 (should be updated to use margin delta)
+**File**: `logger.py` lines 70-92
 
-Currently uses old estimation method:
+Both dashboard and background logger now use the same margin delta method:
 ```python
-from utils.calculations import estimate_leverage_hyperliquid
+from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta
 
-leverage = estimate_leverage_hyperliquid(
-    position_size_usd=position_size_usd,
-    account_equity=account_equity,
-    position_value=position_value if position_value > 0 else None
+# Get current margin used
+clearinghouse_state = client.fetch_clearinghouse_state()
+margin_summary = clearinghouse_state.get('marginSummary', {})
+current_margin_used = float(margin_summary.get('totalMarginUsed', 0) or 0)
+
+# Calculate leverage
+leverage, equity_used, calculation_method = calculate_leverage_from_margin_delta(
+    session, wallet_id, symbol, position_size_usd,
+    current_margin_used, timestamp_dt
 )
 ```
 
-**TODO**: Update logger to use `calculate_leverage_from_margin_delta()` like dashboard does.
+This ensures consistent leverage calculation between dashboard display and background logging.
 
 ## When It Works
 
@@ -274,16 +279,17 @@ When you open a new Hyperliquid position:
 
 ## Implementation Notes
 
-**Margin Delta is the ONLY method to use** (correct approach):
+**Margin Delta is the ONLY method in use** (✅ Complete):
 - ✅ Implemented in `services/hyperliquid_leverage_calculator.py`
 - ✅ Only calculates for NEW positions (detects via first snapshot with size > 0)
 - ✅ Fallback: "unknown" if no previous `totalMarginUsed` snapshot exists
-- ✅ Used correctly in dashboard (`app.py` lines 839-863)
+- ✅ Used in dashboard (`app.py` lines 506-535 and 839-863)
+- ✅ Used in background logger (`logger.py` lines 70-92)
 
-**Old Estimation Method - DEPRECATED** (needs removal):
-- ❌ Still in `utils/calculations.py` as `estimate_leverage_hyperliquid()`
-- ❌ Still used in `logger.py` lines 81-86
-- ❌ Still used in `app.py` lines 500-515 for temp display
-- ❌ Not accurate - uses 0.6/0.8 ratio assumptions
-- Should be completely removed once replaced with margin delta everywhere
+**Old Estimation Method - REMOVED** (✅ Cleanup Complete):
+- ✅ Deleted from `utils/calculations.py` - `estimate_leverage_hyperliquid()` removed
+- ✅ Replaced in `logger.py` lines 70-92 with margin delta
+- ✅ Replaced in `app.py` lines 506-535 with margin delta
+- ✅ Zero references to old method in functional code
+- Old method used inaccurate 0.6/0.8 ratio assumptions - no longer needed
 
