@@ -697,6 +697,12 @@
             const rows = Array.from(document.querySelectorAll('tbody tr.pair-row'));
             const tbody = document.querySelector('tbody');
 
+            // Store visibility state before sorting
+            const visibilityMap = new Map();
+            rows.forEach(row => {
+                visibilityMap.set(row, row.style.display);
+            });
+
             rows.sort((a, b) => {
                 let aVal, bVal;
 
@@ -738,8 +744,11 @@
                 return currentSort.direction === 'asc' ? aVal - bVal : bVal - aVal;
             });
 
-            // Re-append sorted rows
-            rows.forEach(row => tbody.appendChild(row));
+            // Re-append sorted rows and restore visibility state
+            rows.forEach(row => {
+                tbody.appendChild(row);
+                row.style.display = visibilityMap.get(row);
+            });
         }
 
         function updateSortIndicators() {
