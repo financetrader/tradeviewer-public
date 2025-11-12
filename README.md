@@ -9,24 +9,25 @@ References:
 ## Quick start
 
 **Prerequisites:**
-- Docker and Docker Compose installed
+- Python 3.8 or higher
+- pip (Python package manager)
 
 **Setup Steps:**
 
-1. **Create .env file**
+1. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Create .env file**
    ```bash
    cp env.example .env
    # Edit .env and set FLASK_SECRET_KEY (generate with: python3 -c "import secrets; print(secrets.token_hex(32))")
    ```
 
-2. **Start with Docker Compose**
+3. **Start the application**
    ```bash
-   docker-compose up -d
-   ```
-
-3. **View logs**
-   ```bash
-   docker-compose logs -f
+   python app.py
    ```
 
 4. **Access the application**
@@ -35,12 +36,8 @@ References:
    - **Strategies:** http://localhost:5000/admin/strategies
    - **Exchange Logs:** http://localhost:5000/admin/exchange-logs
 
-**Note**: Your existing database (`data/wallet.db`) will be preserved via volume mounts.
-
 **To stop:**
-```bash
-docker-compose down
-```
+Press `Ctrl+C` in the terminal
 
 ## Features
 
@@ -83,11 +80,6 @@ Wallet credentials are now stored in the database via the wallets page. No `.env
 FLASK_SECRET_KEY=your-secret-key-here  # For session security (auto-generated if not set)
 ```
 
-**Docker-specific (automatically set in docker-compose.yml):**
-```bash
-DOCKER_ENV=true  # Set to true when running in Docker
-EXCHANGE_LOG_PATH=/app/logs/exchange_traffic.log  # Log file path in container
-```
 
 **Optional:**
 ```bash
@@ -148,10 +140,6 @@ See `env.example` for a complete list of available environment variables.
   - `data_utils.py` — Data normalization and formatting
   - `logging_utils.py` — Application logging utilities
 
-### Docker Files
-- `Dockerfile` — Container image definition
-- `docker-compose.yml` — Docker Compose configuration for easy deployment
-- `.dockerignore` — Files excluded from Docker build context
 
 ### Migrations & Tests
 - `docs/archive/migrations/` — Historical database migration scripts (archived)
@@ -261,66 +249,6 @@ SELECT * FROM equity_snapshots ORDER BY timestamp DESC LIMIT 10;
 - `position_snapshots` - Position history with equity_used tracking
 - `closed_trades` - Closed trade history with P&L
 
-## Docker Deployment
-
-The application is fully containerized and can be deployed using Docker Compose.
-
-### Quick Start with Docker
-
-```bash
-# 1. Create .env file
-cp env.example .env
-# Edit .env and set FLASK_SECRET_KEY
-
-# 2. Start the application
-docker-compose up -d
-
-# 3. View logs
-docker-compose logs -f
-
-# 4. Stop the application
-docker-compose down
-```
-
-### Docker Features
-
-- **Database Persistence**: The `data/` directory is mounted as a volume, preserving your existing database
-- **Log Persistence**: The `logs/` directory is mounted as a volume, preserving application logs
-- **Health Checks**: Built-in health check endpoint (`/health`) for monitoring
-- **Auto-restart**: Container automatically restarts on failure
-- **Production Ready**: Uses Gunicorn with 4 workers for production workloads
-
-### Docker Commands
-
-```bash
-# Build the image
-docker-compose build
-
-# Start in foreground (for debugging)
-docker-compose up
-
-# Start in background
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop the application
-docker-compose down
-
-# Rebuild and restart
-docker-compose up -d --build
-
-# Execute commands in container
-docker-compose exec wallet-app bash
-```
-
-### Volume Mounts
-
-- `./data:/app/data` - Database directory (preserves `wallet.db`)
-- `./logs:/app/logs` - Log files directory
-
-**Important**: Your existing database will be preserved when using Docker. The volume mounts ensure that `data/wallet.db` persists across container restarts and updates.
 
 ## Data Logging & Synchronization
 
@@ -341,18 +269,17 @@ The application automatically logs and synchronizes data so the dashboard stays 
 
 ### Background Logger
 
-The background logger runs automatically when you start the Docker container. It:
+The background logger runs automatically when you start the application. It:
 - Writes equity snapshots every 30 minutes (:00 and :30 past each hour)
 - Syncs closed trades from exchange API every 30 minutes
 - Runs in a separate background thread (non-blocking)
-- Starts automatically with `docker-compose up -d`
+- Starts automatically with the application
 
 ```bash
 # The logger starts automatically when you run:
-docker-compose up -d
+python app.py
 
-# To view logger output, check Docker logs:
-docker-compose logs -f | grep logger
+# Logger output appears in the console or log files
 ```
 
 ### Chart Behavior

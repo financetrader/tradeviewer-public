@@ -5,7 +5,6 @@ This directory contains everything needed to deploy the wallet monitoring applic
 ## Contents
 
 - **Application Code**: All Python files, services, database models, utilities, templates, and static files
-- **Docker Configuration**: Dockerfile, docker-compose.yml, .dockerignore
 - **Dependencies**: requirements.txt
 - **Configuration Template**: env.example (copy to .env and configure)
 - **Database**: data/wallet.db (your existing database with all data)
@@ -24,30 +23,35 @@ This directory contains everything needed to deploy the wallet monitoring applic
    cd /opt/wallet-app
    ```
 
-3. **Create .env file**
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Create .env file**
    ```bash
    cp env.example .env
    # Edit .env and set FLASK_SECRET_KEY
    # Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-4. **Start with Docker**
+5. **Start the application**
    ```bash
-   docker-compose up -d
+   python app.py
    ```
 
-5. **Verify it's running**
+6. **Verify it's running**
    ```bash
-   docker-compose ps
    curl http://localhost:5000/health
    ```
 
 ## Important Notes
 
-- The database (`data/wallet.db`) is included and will be preserved via Docker volume mounts
-- Make sure Docker and Docker Compose are installed on the server
+- The database (`data/wallet.db`) is included in this package
+- Make sure Python 3.8+ is installed on the server
 - The application will run on port 5000 by default
 - Logs will be written to the `logs/` directory (created automatically)
+- To run in the background, use tools like `screen`, `tmux`, or set up a systemd service
 
 ## What's Excluded
 

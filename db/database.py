@@ -29,10 +29,8 @@ def set_database_permissions():
     """Set secure file permissions on database file (600 = owner read/write only)."""
     if DB_PATH.exists():
         try:
-            # Skip chmod in Docker (permissions handled by volume mounts)
-            if os.getenv('DOCKER_ENV') != 'true':
-                DB_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)
-                print(f"✓ Database permissions set to 600 (owner read/write only)")
+            DB_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            print(f"✓ Database permissions set to 600 (owner read/write only)")
         except Exception as e:
             print(f"Warning: Could not set database permissions: {e}")
 

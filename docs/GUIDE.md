@@ -7,26 +7,26 @@ Complete guide for setting up, running, and securing the wallet monitoring appli
 ## Quick Start
 
 **Prerequisites:**
-- Docker Engine 20.10+ installed
-- Docker Compose installed (or docker-compose standalone)
+- Python 3.8 or higher
+- pip (Python package manager)
 
 **Setup Steps:**
 
-1. **Create .env File**
+1. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Create .env File**
    ```bash
    cp env.example .env
    # Edit .env and set FLASK_SECRET_KEY
    # Generate a key with: python3 -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-2. **Start Application**
+3. **Start Application**
    ```bash
-   docker-compose up -d
-   ```
-
-3. **View Logs**
-   ```bash
-   docker-compose logs -f
+   python app.py
    ```
 
 4. **Access Application**
@@ -35,22 +35,17 @@ Complete guide for setting up, running, and securing the wallet monitoring appli
    - **Strategies:** http://localhost:5000/admin/strategies
    - **Exchange Logs:** http://localhost:5000/admin/exchange-logs
 
-**Note**: Your existing database (`data/wallet.db`) will be preserved via volume mounts.
-
 **To stop the application:**
-```bash
-docker-compose down
-```
+Press `Ctrl+C` in the terminal
 
 ### Database
 
-The database is automatically created on first run inside the Docker container. The `data/` directory is mounted as a volume, so your database persists across container restarts.
+The database is automatically created on first run. The `data/` directory stores your database locally, so it persists across application restarts.
 
 To start fresh (WARNING: This deletes all data):
 ```bash
-docker-compose down
 rm -f data/wallet.db
-docker-compose up -d
+python app.py
 ```
 
 ---
@@ -182,12 +177,9 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 ### Application Logs
 
-View application logs using Docker:
-```bash
-docker-compose logs -f
-```
+View application logs:
+The application logs are displayed in the terminal when you run `python app.py`. You can also view the log files:
 
-View exchange traffic logs:
 ```bash
 tail -f logs/exchange_traffic.log
 ```
@@ -204,10 +196,9 @@ cp data/wallet.db ~/backups/wallet_backup_$(date +%Y%m%d_%H%M%S).db
 
 ### Monitoring
 
-- Check application logs: `docker-compose logs -f`
 - Monitor database size: `ls -lh data/wallet.db`
-- Check container status: `docker-compose ps`
 - Use `/health` endpoint for health checks: `curl http://localhost:5000/health`
+- Check process status: `ps aux | grep app.py`
 
 ### Updates
 
@@ -215,11 +206,13 @@ cp data/wallet.db ~/backups/wallet_backup_$(date +%Y%m%d_%H%M%S).db
 # Pull latest code (if using git)
 git pull
 
-# Rebuild and restart container
-docker-compose up -d --build
+# Reinstall dependencies (in case they changed)
+pip install -r requirements.txt
+
+# Restart the application (stop old one with Ctrl+C, then start new one)
+python app.py
 
 # Verify it's running
-docker-compose ps
 curl http://localhost:5000/health
 ```
 
@@ -237,18 +230,18 @@ kill -9 <PID>
 
 ### ImportError or ModuleNotFoundError
 ```bash
-# Rebuild the Docker image to reinstall dependencies
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+# Reinstall dependencies
+pip install -r requirements.txt --force-reinstall
+
+# Then restart the application
+python app.py
 ```
 
 ### Database Errors
 ```bash
 # Remove and recreate database (WARNING: deletes all data)
-docker-compose down
 rm -f data/wallet.db
-docker-compose up -d
+python app.py
 ```
 
 ### Can't Decrypt Wallet Credentials
@@ -274,9 +267,9 @@ chmod 600 ./data/wallet.db
 ```
 
 ### CSRF Token Errors
-- Flask-WTF is included in the Docker image
+- Flask-WTF is included in the dependencies (requirements.txt)
 - Check that forms include CSRF token: `<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>`
-- If issues persist, rebuild the container: `docker-compose up -d --build`
+- If issues persist, reinstall dependencies: `pip install -r requirements.txt --force-reinstall`
 
 ### Validation Errors
 - Check `utils/validation.py` for validation rules
@@ -404,16 +397,14 @@ gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 60 app:app
 
 ---
 
-## Docker Deployment
-
-The application is fully containerized and ready for Docker deployment. Docker provides a consistent environment across development, staging, and production.
+## Production Deployment
 
 ### Prerequisites
 
-- Docker Engine 20.10+ installed
-- Docker Compose 2.0+ installed
+- Python 3.8 or higher
+- pip (Python package manager)
 
-### Quick Start with Docker
+### Setup
 
 1. **Create .env File**
    ```bash
@@ -423,198 +414,160 @@ The application is fully containerized and ready for Docker deployment. Docker p
    # - ENCRYPTION_KEY (optional, for credential encryption)
    ```
 
-2. **Start the Application**
+2. **Install Dependencies**
    ```bash
-   docker-compose up -d
+   pip install -r requirements.txt
    ```
 
-3. **Verify It's Running**
+3. **Start the Application**
    ```bash
-   docker-compose ps
+   python app.py
+   ```
+
+4. **Verify It's Running**
+   ```bash
    curl http://localhost:5000/health
    ```
 
-### Docker Configuration
-
-The `docker-compose.yml` file configures:
-- **Port**: 5000 (configurable via `PORT` environment variable)
-- **Volumes**: 
-  - `./data:/app/data` - Database directory (preserves `wallet.db`)
-  - `./logs:/app/logs` - Log files directory
-- **Environment**: Loads from `.env` file
-- **Health Check**: Uses `/health` endpoint
-- **Restart Policy**: `unless-stopped` (auto-restart on failure)
-
-### Docker Commands
-
-```bash
-# Build the image
-docker-compose build
-
-# Start in foreground (for debugging)
-docker-compose up
-
-# Start in background
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# View logs for specific service
-docker-compose logs -f wallet-app
-
-# Stop the application
-docker-compose down
-
-# Stop and remove volumes (WARNING: deletes database!)
-docker-compose down -v
-
-# Rebuild and restart
-docker-compose up -d --build
-
-# Execute commands in container
-docker-compose exec wallet-app bash
-
-# Check container status
-docker-compose ps
-
-# View resource usage
-docker stats wallet-app
-```
-
 ### Database Persistence
 
-**Important**: Your existing database (`data/wallet.db`) is preserved via volume mounts. The `./data` directory is mounted into the container, ensuring:
+**Important**: Your existing database (`data/wallet.db`) is stored locally and persists across application restarts. You can backup the database by copying `data/wallet.db`:
 
-- Database persists across container restarts
-- Database persists when updating the container image
-- You can backup the database by copying `data/wallet.db` from the host
+```bash
+cp data/wallet.db data/wallet_backup_$(date +%Y%m%d_%H%M%S).db
+```
 
 ### Log Persistence
 
-Application logs are written to `./logs` directory, which is mounted as a volume:
+Application logs are written to `./logs` directory:
 
 - `logs/exchange_traffic.log` - Exchange API traffic logs
-- `logs/gunicorn-access.log` - Gunicorn access logs (if configured)
-- `logs/gunicorn-error.log` - Gunicorn error logs (if configured)
 
-Logs persist across container restarts and can be viewed from the host system.
+Logs persist across application restarts and can be viewed from the host system.
 
-### Environment Variables
+### Running in Background
 
-Docker-specific environment variables (set automatically in `docker-compose.yml`):
+To run the application in the background, use tools like `screen`, `tmux`, or set up a systemd service:
 
-- `DOCKER_ENV=true` - Indicates running in Docker (skips chmod operations)
-- `EXCHANGE_LOG_PATH=/app/logs/exchange_traffic.log` - Log file path in container
-- `FLASK_ENV=production` - Production mode (debug disabled)
+**Using screen:**
+```bash
+screen -S wallet-app
+python app.py
+# Press Ctrl+A then D to detach
+```
 
-Additional variables can be set in `.env` file and will be loaded automatically.
+**Using tmux:**
+```bash
+tmux new-session -d -s wallet-app python app.py
+```
+
+**Using systemd (create `/etc/systemd/system/wallet-app.service`):**
+```ini
+[Unit]
+Description=Wallet Monitoring Application
+After=network.target
+
+[Service]
+Type=simple
+User=your_user
+WorkingDirectory=/path/to/app-tradeviewer
+ExecStart=/usr/bin/python3 app.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wallet-app
+sudo systemctl start wallet-app
+```
 
 ### Updating the Application
 
 To update the application with new code:
 
 ```bash
+# Stop the application (Ctrl+C if running in foreground, or systemctl stop wallet-app)
+
 # Pull latest code (if using git)
 git pull
 
-# Rebuild and restart
-docker-compose up -d --build
+# Reinstall dependencies if they changed
+pip install -r requirements.txt
 
-# Verify it's running
-docker-compose ps
-curl http://localhost:5000/health
+# Start the application again
+python app.py
 ```
 
 Your database and logs will be preserved during updates.
 
-### Docker Troubleshooting
+### Troubleshooting
 
-**Container won't start:**
+**Port 5000 already in use:**
 ```bash
-# Check logs
-docker-compose logs wallet-app
-
 # Check if port is already in use
 lsof -i :5000
 
-# Verify .env file exists and has required variables
-cat .env
+# Kill the process
+kill -9 <PID>
 ```
-
-**Database permission errors:**
-- The application skips `chmod` operations in Docker (handled by volume mounts)
-- Ensure `data/` directory is writable: `chmod 755 data/`
 
 **Can't access the application:**
 ```bash
-# Check if container is running
-docker-compose ps
-
 # Check health endpoint
 curl http://localhost:5000/health
 
-# Check container logs
-docker-compose logs -f wallet-app
+# Check if process is running
+ps aux | grep app.py
 ```
 
 **Background logger not running:**
-- The background logger runs inside the container automatically
-- Check logs: `docker-compose logs wallet-app | grep logger`
+- The background logger runs automatically when the application starts
+- Check the logs in `logs/exchange_traffic.log`
 - The logger runs every 30 minutes and logs to the database
 
-**Volume mount issues:**
-```bash
-# Verify volumes are mounted correctly
-docker-compose exec wallet-app ls -la /app/data
-docker-compose exec wallet-app ls -la /app/logs
+---
 
-# Check file permissions
-docker-compose exec wallet-app ls -l /app/data/wallet.db
+## Monitoring & Backup
+
+### Monitoring
+
+```bash
+# Check if process is running
+ps aux | grep app.py
+
+# Monitor disk space for database and logs
+df -h
+ls -lh data/wallet.db
+
+# Check health endpoint
+curl http://localhost:5000/health
 ```
 
-### Production Deployment with Docker
+### Backup Strategy
 
-For production deployment:
+```bash
+# Backup database
+cp data/wallet.db backups/wallet_backup_$(date +%Y%m%d_%H%M%S).db
 
-1. **Set Production Environment Variables**
-   ```bash
-   # In .env file
-   FLASK_ENV=production
-   FLASK_SECRET_KEY=<strong-random-key>
-   ENCRYPTION_KEY=<fernet-key>
-   ```
-
-2. **Use Reverse Proxy (Nginx)**
-   - Configure Nginx to proxy to `localhost:5000`
-   - Set up SSL/TLS certificates
-   - See "Production Deployment" section above
-
-3. **Set Up Monitoring**
-   - Monitor container health: `docker-compose ps`
-   - Monitor logs: `docker-compose logs -f`
-   - Set up log rotation for Docker logs
-   - Monitor disk space for database and logs
-
-4. **Backup Strategy**
-   ```bash
-   # Backup database
-   cp data/wallet.db backups/wallet_backup_$(date +%Y%m%d_%H%M%S).db
-   
-   # Backup can be automated with cron
-   # Add to crontab: 0 2 * * * /path/to/backup-script.sh
-   ```
+# Backup can be automated with cron
+# Add to crontab: 0 2 * * * /path/to/backup-script.sh
+```
 
 ---
 
 ## Support
 
 For issues or questions:
-1. Check Docker logs: `docker-compose logs -f`
+1. Check console output when running `python app.py`
 2. Review this guide
 3. Check `README.md` for project overview
 4. Verify all environment variables are set in `.env` file
-5. Check container status: `docker-compose ps`
+5. Check if process is running: `ps aux | grep app.py`
 6. Verify health endpoint: `curl http://localhost:5000/health`
 
 See `README.md` for project overview, features, and detailed information.

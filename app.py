@@ -63,11 +63,6 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 
-# Add ProxyFix middleware when behind nginx proxy
-if os.getenv('DOCKER_ENV') == 'true' or os.getenv('FLASK_ENV') == 'production':
-    from werkzeug.middleware.proxy_fix import ProxyFix
-    # Trust 1 proxy (nginx) for X-Forwarded-* headers
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # Add security middleware
 add_security_headers(app)
