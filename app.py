@@ -1160,35 +1160,49 @@ def edit_wallet(wallet_id):
             
             if request.method == 'POST':
                 # Update wallet fields with validation
+                credentials_changed = False
+
                 if 'name' in request.form:
                     new_name = validate_wallet_name(request.form.get('name'))
                     if new_name:
                         wallet.name = new_name
-                
+
                 if 'api_name' in request.form:
                     wallet.api_name = sanitize_string(request.form.get('api_name', ''), max_length=255, allow_empty=True) or None
-                
+
                 if 'provider' in request.form:
                     new_provider = sanitize_string(request.form.get('provider', ''), max_length=50, allow_empty=False)
                     if new_provider in ['apex_omni', 'hyperliquid', 'property']:
                         wallet.provider = new_provider
-                
+
                 if 'wallet_type' in request.form:
                     new_wallet_type = sanitize_string(request.form.get('wallet_type', ''), max_length=50, allow_empty=False)
                     if new_wallet_type in ['crypto', 'stocks', 'property']:
                         wallet.wallet_type = new_wallet_type
-                
-                # Provider-specific fields
+
+                # Provider-specific fields (track if credentials changed)
                 if 'api_key' in request.form:
-                    wallet.api_key = sanitize_string(request.form.get('api_key', ''), max_length=1000, allow_empty=True) or None
+                    new_api_key = sanitize_string(request.form.get('api_key', ''), max_length=1000, allow_empty=True) or None
+                    if new_api_key != wallet.api_key:
+                        credentials_changed = True
+                    wallet.api_key = new_api_key
                 if 'api_secret' in request.form:
-                    wallet.api_secret = sanitize_string(request.form.get('api_secret', ''), max_length=1000, allow_empty=True) or None
+                    new_api_secret = sanitize_string(request.form.get('api_secret', ''), max_length=1000, allow_empty=True) or None
+                    if new_api_secret != wallet.api_secret:
+                        credentials_changed = True
+                    wallet.api_secret = new_api_secret
                 if 'api_passphrase' in request.form:
-                    wallet.api_passphrase = sanitize_string(request.form.get('api_passphrase', ''), max_length=1000, allow_empty=True) or None
+                    new_api_passphrase = sanitize_string(request.form.get('api_passphrase', ''), max_length=1000, allow_empty=True) or None
+                    if new_api_passphrase != wallet.api_passphrase:
+                        credentials_changed = True
+                    wallet.api_passphrase = new_api_passphrase
                 if 'wallet_address' in request.form:
                     wallet_address_raw = request.form.get('wallet_address', '').strip()
-                    wallet.wallet_address = validate_wallet_address(wallet_address_raw) if wallet_address_raw else None
-                
+                    new_wallet_address = validate_wallet_address(wallet_address_raw) if wallet_address_raw else None
+                    if new_wallet_address != wallet.wallet_address:
+                        credentials_changed = True
+                    wallet.wallet_address = new_wallet_address
+
                 # Property-specific fields
                 if 'asset_name' in request.form:
                     wallet.asset_name = sanitize_string(request.form.get('asset_name', ''), max_length=255, allow_empty=True) or None
@@ -1197,11 +1211,12 @@ def edit_wallet(wallet_id):
                     wallet.asset_value = sanitize_float(asset_value_raw, default=None, min_val=0) if asset_value_raw else None
                 if 'asset_currency' in request.form:
                     wallet.asset_currency = sanitize_string(request.form.get('asset_currency', 'USD'), max_length=10, allow_empty=False).upper()
-                
-                # Reset status after editing
-                wallet.status = 'not_tested'
-                wallet.error_message = None
-                wallet.last_test = None
+
+                # Only reset status if credentials changed, not just name/metadata
+                if credentials_changed:
+                    wallet.status = 'not_tested'
+                    wallet.error_message = None
+                    wallet.last_test = None
                 
                 session.commit()
                 flash(f'Wallet "{wallet.name}" updated successfully!', 'success')
