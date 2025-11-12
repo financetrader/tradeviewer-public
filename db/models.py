@@ -188,3 +188,41 @@ class ClosedTrade(Base):
     
     def __repr__(self):
         return f"<ClosedTrade(timestamp={self.timestamp}, symbol={self.symbol}, closed_pnl={self.closed_pnl})>"
+
+
+class AggregatedTrade(Base):
+    """Aggregated trades grouped by timestamp and symbol.
+
+    Exchange APIs return individual fills. This table groups fills from the same
+    order (same timestamp + symbol) into logical trades for cleaner UI display.
+    """
+    __tablename__ = 'aggregated_trades'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    wallet_id = Column(Integer, nullable=True)
+    timestamp = Column(DateTime, nullable=False)
+    symbol = Column(String(50), nullable=False)
+    side = Column(String(10), nullable=False)  # buy or sell
+    size = Column(Float, nullable=False)  # Total size from all fills
+    avg_entry_price = Column(Float, nullable=False)
+    avg_exit_price = Column(Float, nullable=False)
+    trade_type = Column(String(10), nullable=False)
+    total_pnl = Column(Float, nullable=False)  # Sum of all fill PnLs
+    total_close_fee = Column(Float, nullable=True)
+    total_open_fee = Column(Float, nullable=True)
+    total_liquidate_fee = Column(Float, nullable=True)
+    exit_type = Column(String(20), nullable=True)
+    equity_used = Column(Float, nullable=True)
+    leverage = Column(Float, nullable=True)
+    strategy_id = Column(Integer, nullable=True)
+    fill_count = Column(Integer, default=1)  # Number of fills aggregated
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_agg_wallet_timestamp', 'wallet_id', 'timestamp'),
+        Index('idx_agg_wallet_symbol_timestamp', 'wallet_id', 'symbol', 'timestamp'),
+        Index('idx_agg_timestamp', 'timestamp'),
+    )
+
+    def __repr__(self):
+        return f"<AggregatedTrade(timestamp={self.timestamp}, symbol={self.symbol}, size={self.size}, total_pnl={self.total_pnl})>"

@@ -1086,19 +1086,17 @@ def get_recent_trades(session: Session, limit: int = 10, wallet_id: Optional[int
         has_leverage_column = False
 
     try:
+        from db.models import AggregatedTrade
         query = (
-            session.query(ClosedTrade, Strategy.name, WalletConfig.name)
-            .outerjoin(Strategy, ClosedTrade.strategy_id == Strategy.id)
-            .outerjoin(WalletConfig, ClosedTrade.wallet_id == WalletConfig.id)
+            session.query(AggregatedTrade, Strategy.name, WalletConfig.name)
+            .outerjoin(Strategy, AggregatedTrade.strategy_id == Strategy.id)
+            .outerjoin(WalletConfig, AggregatedTrade.wallet_id == WalletConfig.id)
         )
 
         if wallet_id:
-            query = query.filter(ClosedTrade.wallet_id == wallet_id)
+            query = query.filter(AggregatedTrade.wallet_id == wallet_id)
 
-        # Fetch more trades initially to account for filtering out zero PnL trades
-        # Opening fills have zero PnL, so we need to fetch more to get enough closing fills
-        fetch_limit = limit * 3
-        query = query.order_by(desc(ClosedTrade.timestamp)).limit(fetch_limit)
+        query = query.order_by(desc(AggregatedTrade.timestamp)).limit(limit)
         trades = query.all()
     except OperationalError as e:
         # Handle case where leverage column doesn't exist yet
@@ -1145,49 +1143,39 @@ def get_recent_trades(session: Session, limit: int = 10, wallet_id: Optional[int
             return 'sell'
         return s or 'buy'
 
+    # Convert aggregated trades to result dicts
     results = []
-    for trade, strategy_name, wallet_name in trades:
-        # Skip opening fills - only show trades that actually closed a position (have PnL)
-        # Opening fills have closed_pnl = 0, closing fills have non-zero closed_pnl
-        closed_pnl = float(trade.closed_pnl or 0)
-        if abs(closed_pnl) < 0.01:  # Filter out trades with PnL less than $0.01
-            continue
-        
-        # Stop if we have enough filtered results
-        if len(results) >= limit:
-            break
-        
-        side_norm = _normalize_side(trade.side)
-        trade_type_norm = _normalize_side(trade.trade_type)
-        
-        # Handle leverage field - may not exist in database yet
+    for agg_trade, strategy_name, wallet_name in trades:
+        side_norm = _normalize_side(agg_trade.side)
+        trade_type_norm = _normalize_side(agg_trade.trade_type)
+
         leverage = None
         if has_leverage_column:
             try:
-                leverage = float(trade.leverage) if trade.leverage is not None else None
+                leverage = float(agg_trade.leverage) if agg_trade.leverage is not None else None
             except (AttributeError, TypeError):
                 leverage = None
-        
+
         results.append({
-            'timestamp': trade.timestamp,
-            'createdAtFormatted': trade.timestamp.strftime("%Y-%m-%d %H:%M"),
+            'timestamp': agg_trade.timestamp,
+            'createdAtFormatted': agg_trade.timestamp.strftime("%Y-%m-%d %H:%M"),
             'side': side_norm,
-            'symbol': normalize_symbol(str(trade.symbol)),
-            'size': trade.size,
-            'price': trade.entry_price,
-            'entryPrice': trade.entry_price,
-            'exitPrice': trade.exit_price,
+            'symbol': normalize_symbol(str(agg_trade.symbol)),
+            'size': agg_trade.size,
+            'price': agg_trade.avg_entry_price,
+            'entryPrice': agg_trade.avg_entry_price,
+            'exitPrice': agg_trade.avg_exit_price,
             'tradeType': trade_type_norm,
-            'totalPnl': trade.closed_pnl,
-            'closedPnl': trade.closed_pnl,
-            'closeFee': trade.close_fee,
-            'openFee': trade.open_fee,
-            'liquidateFee': trade.liquidate_fee,
-            'exitType': trade.exit_type,
-            'equityUsed': trade.equity_used or 0.0,
+            'totalPnl': agg_trade.total_pnl,
+            'closedPnl': agg_trade.total_pnl,
+            'closeFee': agg_trade.total_close_fee,
+            'openFee': agg_trade.total_open_fee,
+            'liquidateFee': agg_trade.total_liquidate_fee,
+            'exitType': agg_trade.exit_type,
+            'equityUsed': agg_trade.equity_used or 0.0,
             'leverage': leverage,
             'strategy_name': strategy_name,
-            'wallet_id': trade.wallet_id,
+            'wallet_id': agg_trade.wallet_id,
             'wallet_name': wallet_name,
         })
 
