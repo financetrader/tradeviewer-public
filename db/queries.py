@@ -422,30 +422,33 @@ def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None,
         except (AttributeError, TypeError):
             leverage = None
 
-        # If leverage is missing, look it up from position snapshots
+        # If leverage or equity_used is missing, look it up from position snapshots
         # ONLY use snapshots that were recorded while the position was open during this trade
         # Match: snapshot within 5 minutes after trade + similar position size (within 10%)
-        if leverage is None and agg_trade.wallet_id and agg_trade.symbol:
+        equity_used = agg_trade.equity_used
+        if (leverage is None or equity_used is None or equity_used == 0.0) and agg_trade.wallet_id and agg_trade.symbol:
             try:
                 pos_snap = (
-                    session.query(PositionSnapshot.leverage, PositionSnapshot.size)
+                    session.query(PositionSnapshot.leverage, PositionSnapshot.size, PositionSnapshot.equity_used)
                     .filter(PositionSnapshot.wallet_id == agg_trade.wallet_id)
                     .filter(PositionSnapshot.symbol == normalize_symbol(str(agg_trade.symbol)))
                     .filter(PositionSnapshot.timestamp >= agg_trade.timestamp)
                     .filter(PositionSnapshot.timestamp <= agg_trade.timestamp + timedelta(minutes=5))
-                    .filter(PositionSnapshot.leverage.isnot(None))
                     .filter(PositionSnapshot.size > 0)
                     .order_by(asc(PositionSnapshot.timestamp))
                     .first()
                 )
                 if pos_snap:
-                    pos_leverage, pos_size = pos_snap
+                    pos_leverage, pos_size, pos_equity_used = pos_snap
                     # Verify the position size matches (same position, not a different one opened later)
                     # Allow 10% size difference to account for rounding/liquidations
                     if agg_trade.size > 0 and abs(pos_size - agg_trade.size) / agg_trade.size < 0.1:
-                        leverage = float(pos_leverage)
+                        if leverage is None and pos_leverage is not None:
+                            leverage = float(pos_leverage)
+                        if (equity_used is None or equity_used == 0.0) and pos_equity_used is not None:
+                            equity_used = float(pos_equity_used)
             except Exception:
-                pass  # If lookup fails, leverage stays None
+                pass  # If lookup fails, values stay as they are
 
         results.append({
             'timestamp': agg_trade.timestamp,
@@ -463,7 +466,7 @@ def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None,
             'openFee': agg_trade.total_open_fee,
             'liquidateFee': agg_trade.total_liquidate_fee,
             'exitType': agg_trade.exit_type,
-            'equityUsed': agg_trade.equity_used or 0.0,
+            'equityUsed': equity_used or 0.0,
             'leverage': leverage,
             'strategy_name': strategy_name,
             'wallet_id': agg_trade.wallet_id,
@@ -1286,7 +1289,7 @@ def get_recent_trades(session: Session, limit: int = 10, wallet_id: Optional[int
             'openFee': agg_trade.total_open_fee,
             'liquidateFee': agg_trade.total_liquidate_fee,
             'exitType': agg_trade.exit_type,
-            'equityUsed': agg_trade.equity_used or 0.0,
+            'equityUsed': equity_used or 0.0,
             'leverage': leverage,
             'strategy_name': strategy_name,
             'wallet_id': agg_trade.wallet_id,
