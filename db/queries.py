@@ -409,6 +409,8 @@ def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None,
         return get_closed_trades(session, symbol=symbol, wallet_id=wallet_id)
 
     # Convert aggregated trades to result dicts
+    from db.models import PositionSnapshot
+
     results = []
     for agg_trade, strategy_name, wallet_name in trades:
         side_norm = _normalize_side(agg_trade.side)
@@ -419,6 +421,25 @@ def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None,
             leverage = float(agg_trade.leverage) if agg_trade.leverage is not None else None
         except (AttributeError, TypeError):
             leverage = None
+
+        # If leverage is missing, look it up from position snapshots
+        # Use the first position snapshot at or shortly after the trade timestamp
+        if leverage is None and agg_trade.wallet_id and agg_trade.symbol:
+            try:
+                pos_snap = (
+                    session.query(PositionSnapshot.leverage)
+                    .filter(PositionSnapshot.wallet_id == agg_trade.wallet_id)
+                    .filter(PositionSnapshot.symbol == normalize_symbol(str(agg_trade.symbol)))
+                    .filter(PositionSnapshot.timestamp >= agg_trade.timestamp)
+                    .filter(PositionSnapshot.leverage.isnot(None))
+                    .filter(PositionSnapshot.size > 0)
+                    .order_by(asc(PositionSnapshot.timestamp))
+                    .first()
+                )
+                if pos_snap:
+                    leverage = float(pos_snap[0])
+            except Exception:
+                pass  # If lookup fails, leverage stays None
 
         results.append({
             'timestamp': agg_trade.timestamp,
