@@ -274,11 +274,14 @@ def run_scheduler():
             client, wallet_id = WalletService.get_admin_wallet_client_and_id()
             from services.apex_client import get_all_fills
             from services.sync_service import sync_closed_trades_from_fills
+            from services.aggregation_service import sync_aggregated_trades
             fills = get_all_fills(client)
             with get_session() as session:
                 count = sync_closed_trades_from_fills(session, fills, wallet_id)
+                # Aggregate new closed trades into aggregated_trades table
+                agg_count = sync_aggregated_trades(session, wallet_id=wallet_id)
                 session.commit()
-            print(f"Synced {count} closed trades from fills")
+            print(f"Synced {count} closed trades from fills, aggregated into {agg_count} trades")
         except Exception as e:
             print(f"Error syncing closed trades: {e}")
 

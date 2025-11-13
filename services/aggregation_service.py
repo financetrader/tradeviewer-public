@@ -11,8 +11,9 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
     """
     Sync aggregated_trades from closed_trades.
 
-    Groups all closed_trades with |PnL| >= $0.01 by (wallet_id, timestamp, symbol)
-    and upserts into aggregated_trades table.
+    Groups all closed_trades by (wallet_id, timestamp, symbol) and upserts into
+    aggregated_trades table. Includes trades with 0.0 PnL (e.g., Apex fills that
+    don't have PnL data until position fully closed).
 
     Args:
         session: Database session
@@ -23,10 +24,8 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
     """
     from sqlalchemy import and_
 
-    # Get all closed_trades with meaningful PnL
-    query = session.query(ClosedTrade).filter(
-        (ClosedTrade.closed_pnl >= 0.01) | (ClosedTrade.closed_pnl <= -0.01)
-    )
+    # Get all closed_trades (including 0.0 PnL trades from Apex fills which don't have PnL data)
+    query = session.query(ClosedTrade)
 
     if wallet_id:
         query = query.filter(ClosedTrade.wallet_id == wallet_id)
