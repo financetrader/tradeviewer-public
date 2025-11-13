@@ -836,8 +836,11 @@ def wallet_dashboard(wallet_id):
                                     position_data['equity_used'] = equity_used
                                 position_data['initial_margin_at_open'] = current_initial_margin
                                 position_data['calculation_method'] = method
-                                
-                                app.logger.info(f"Apex leverage calc for {symbol}: {leverage:.1f}x via {method}")
+
+                                if leverage is not None:
+                                    app.logger.info(f"Apex leverage calc for {symbol}: {leverage:.1f}x via {method}")
+                                else:
+                                    app.logger.info(f"Apex leverage calc for {symbol}: calculation returned None (method: {method})")
                             except Exception as e:
                                 app.logger.error(f"Error calculating Apex leverage for {symbol}: {e}")
                                 position_data['calculation_method'] = 'error'

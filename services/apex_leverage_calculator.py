@@ -178,37 +178,62 @@ def calculate_leverage_from_margin_delta(
     
     # Check if this is a new position
     if not is_new_position(session, wallet_id, symbol, current_timestamp):
-        logger.info(f"[{symbol}] Existing position - not calculating via margin delta")
+        logger.info(f"[{symbol}] Existing position - not calculating via equity delta")
         # For existing positions, try margin rate fallback
         return calculate_from_margin_rate(position_raw)
-    
-    # Get previous initial margin
-    previous_margin = get_previous_initial_margin(session, wallet_id, current_timestamp)
-    
-    if previous_margin is None:
-        logger.warning(f"[{symbol}] No previous margin data - trying margin rate fallback")
+
+    # Get equity snapshots before and after position opened
+    # Use available_balance delta instead of initial_margin because:
+    # - initialMargin is only present when positions are open (None when no positions)
+    # - available_balance is always present and directly shows equity used
+    lookback = current_timestamp - timedelta(hours=1)
+
+    # Get previous available balance (before position opened)
+    previous_snapshot = session.query(EquitySnapshot).filter(
+        EquitySnapshot.wallet_id == wallet_id,
+        EquitySnapshot.timestamp < current_timestamp,
+        EquitySnapshot.timestamp >= lookback,
+        EquitySnapshot.available_balance.isnot(None)
+    ).order_by(EquitySnapshot.timestamp.desc()).first()
+
+    if previous_snapshot is None:
+        logger.warning(f"[{symbol}] No previous equity snapshot found - trying margin rate fallback")
         return calculate_from_margin_rate(position_raw)
-    
-    # Calculate margin delta
-    margin_delta = current_initial_margin - previous_margin
-    
-    logger.info(f"[{symbol}] Margin calculation:")
-    logger.info(f"  Previous margin: ${previous_margin:.2f}" if previous_margin else "  Previous margin: None")
-    logger.info(f"  Current margin: ${current_initial_margin:.2f}")
-    logger.info(f"  Delta (equity used): ${margin_delta:.2f}")
-    
+
+    # Get current available balance (at/after position opened)
+    current_snapshot = session.query(EquitySnapshot).filter(
+        EquitySnapshot.wallet_id == wallet_id,
+        EquitySnapshot.timestamp >= current_timestamp,
+        EquitySnapshot.timestamp <= current_timestamp + timedelta(minutes=5),
+        EquitySnapshot.available_balance.isnot(None)
+    ).order_by(EquitySnapshot.timestamp.asc()).first()
+
+    if current_snapshot is None:
+        logger.warning(f"[{symbol}] No current equity snapshot found - trying margin rate fallback")
+        return calculate_from_margin_rate(position_raw)
+
+    # Calculate equity delta (how much available balance decreased = equity used for position)
+    previous_balance = float(previous_snapshot.available_balance)
+    current_balance = float(current_snapshot.available_balance)
+    equity_delta = previous_balance - current_balance  # Balance decreases when position opens
+
+    logger.info(f"[{symbol}] Equity delta calculation:")
+    logger.info(f"  Previous balance: ${previous_balance:.2f} at {previous_snapshot.timestamp}")
+    logger.info(f"  Current balance: ${current_balance:.2f} at {current_snapshot.timestamp}")
+    logger.info(f"  Delta (equity used): ${equity_delta:.2f}")
+
     # Validate delta
-    if margin_delta <= 0:
-        logger.warning(f"[{symbol}] Invalid margin delta ({margin_delta:.2f}) - using fallback")
+    if equity_delta <= 0:
+        logger.warning(f"[{symbol}] Invalid equity delta ({equity_delta:.2f}) - balance should decrease when opening position")
         return calculate_from_margin_rate(position_raw)
-    
-    if margin_delta > position_size_usd:
-        logger.warning(f"[{symbol}] Margin delta (${margin_delta:.2f}) > position size (${position_size_usd:.2f})")
+
+    if equity_delta > position_size_usd:
+        logger.warning(f"[{symbol}] Equity delta (${equity_delta:.2f}) > position size (${position_size_usd:.2f})")
         logger.warning(f"  This may indicate multiple positions opened simultaneously")
         # Still calculate, but log the anomaly
-    
+
     # Calculate leverage
-    equity_used = margin_delta
+    equity_used = equity_delta
     leverage = position_size_usd / equity_used
     
     logger.info(f"[{symbol}] RESULT:")
