@@ -1273,6 +1273,12 @@ def get_recent_trades(session: Session, limit: int = 10, wallet_id: Optional[int
             except (AttributeError, TypeError):
                 leverage = None
 
+        equity_used = None
+        try:
+            equity_used = float(agg_trade.equity_used) if agg_trade.equity_used is not None else None
+        except (AttributeError, TypeError):
+            equity_used = None
+
         results.append({
             'timestamp': agg_trade.timestamp,
             'createdAtFormatted': agg_trade.timestamp.strftime("%Y-%m-%d %H:%M"),
