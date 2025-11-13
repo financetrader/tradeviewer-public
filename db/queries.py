@@ -423,21 +423,27 @@ def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None,
             leverage = None
 
         # If leverage is missing, look it up from position snapshots
-        # Use the first position snapshot at or shortly after the trade timestamp
+        # ONLY use snapshots that were recorded while the position was open during this trade
+        # Match: snapshot within 5 minutes after trade + similar position size (within 10%)
         if leverage is None and agg_trade.wallet_id and agg_trade.symbol:
             try:
                 pos_snap = (
-                    session.query(PositionSnapshot.leverage)
+                    session.query(PositionSnapshot.leverage, PositionSnapshot.size)
                     .filter(PositionSnapshot.wallet_id == agg_trade.wallet_id)
                     .filter(PositionSnapshot.symbol == normalize_symbol(str(agg_trade.symbol)))
                     .filter(PositionSnapshot.timestamp >= agg_trade.timestamp)
+                    .filter(PositionSnapshot.timestamp <= agg_trade.timestamp + timedelta(minutes=5))
                     .filter(PositionSnapshot.leverage.isnot(None))
                     .filter(PositionSnapshot.size > 0)
                     .order_by(asc(PositionSnapshot.timestamp))
                     .first()
                 )
                 if pos_snap:
-                    leverage = float(pos_snap[0])
+                    pos_leverage, pos_size = pos_snap
+                    # Verify the position size matches (same position, not a different one opened later)
+                    # Allow 10% size difference to account for rounding/liquidations
+                    if agg_trade.size > 0 and abs(pos_size - agg_trade.size) / agg_trade.size < 0.1:
+                        leverage = float(pos_leverage)
             except Exception:
                 pass  # If lookup fails, leverage stays None
 
