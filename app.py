@@ -514,7 +514,6 @@ def wallet_dashboard(wallet_id):
                     # The actual persisted leverage in the database comes from position_snapshots
                     with get_session() as session:
                         from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta as hl_calc_leverage
-                        from datetime import datetime
                         leverage, equity_used, calculation_method = hl_calc_leverage(
                             session, wallet_id, p.get('asset', ''),
                             position_size_usd, total_margin_used, datetime.utcnow()
