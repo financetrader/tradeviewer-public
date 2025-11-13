@@ -47,6 +47,7 @@ def sync_closed_trades_from_fills(session: Session, fills: List[Dict[str, Any]],
                 'equity_used': 0.0,
                 'leverage': leverage,
                 'strategy_id': strategy_id,  # Add resolved strategy_id
+                'reduce_only': o.get('reduceOnly'),  # True if closing position, False if opening
             }
             if data['symbol'] and data['timestamp']:
                 queries.upsert_closed_trade(session, data, wallet_id)

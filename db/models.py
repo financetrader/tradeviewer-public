@@ -175,6 +175,7 @@ class ClosedTrade(Base):
     equity_used = Column(Float, nullable=True)
     leverage = Column(Float, nullable=True)  # Estimated leverage from position snapshots
     strategy_id = Column(Integer, nullable=True)  # Foreign key to Strategy
+    reduce_only = Column(Boolean, nullable=True)  # True if closes position, False if opens, None if unknown
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
