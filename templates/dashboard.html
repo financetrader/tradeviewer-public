@@ -355,6 +355,7 @@
                             <th>Entry Price</th>
                             <th>Exit Price</th>
                             <th>Trade Type</th>
+                            <th>Leverage</th>
                             <th>Closed P&L</th>
                             <th>Strategy</th>
                         </tr>
@@ -371,6 +372,7 @@
                             <td>${{ "%.2f"|format(pnl.price|float) }}</td>
                             <td>${{ "%.2f"|format(pnl.exitPrice|float) }}</td>
                             <td><span class="badge badge-{{ pnl.tradeType|lower }}">{{ pnl.tradeType }}</span></td>
+                            <td>{% if pnl.leverage %}{{ "%.1f"|format(pnl.leverage) }}x{% else %}-{% endif %}</td>
                             <td class="{% if pnl.totalPnl|float >= 0 %}positive{% else %}negative{% endif %}">
                                 ${{ "%.2f"|format(pnl.totalPnl|float) }}
                             </td>
