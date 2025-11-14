@@ -324,39 +324,61 @@ def get_leverage_at_timestamp(
     wallet_id: Optional[int],
     symbol: str,
     timestamp: datetime
-) -> Optional[float]:
-    """Get leverage for a symbol/wallet at a specific timestamp from position snapshots.
-    
+) -> tuple[Optional[float], Optional[float]]:
+    """Get leverage and equity_used for a symbol/wallet at a specific timestamp from position snapshots.
+
     This looks up leverage that was calculated and stored when the position was open.
     Used when syncing closed trades to get the leverage that was calculated for the position.
-    
+
+    First tries to find a snapshot before or at the timestamp, then tries after (within 1 hour)
+    to handle cases where trade closed before logger captured position snapshot.
+
     Args:
         session: Database session
         wallet_id: Wallet ID to filter by
         symbol: Symbol to look up
-        timestamp: Timestamp to look up leverage at or before
-        
+        timestamp: Timestamp to look up leverage at or near
+
     Returns:
-        Leverage value if found, None otherwise
+        Tuple of (leverage, equity_used) if found, (None, None) otherwise
     """
-    query = (
-        session.query(PositionSnapshot.leverage)
+    # Try to find snapshot before or at the timestamp first
+    query_before = (
+        session.query(PositionSnapshot.leverage, PositionSnapshot.equity_used)
         .filter(PositionSnapshot.symbol == normalize_symbol(symbol))
         .filter(PositionSnapshot.timestamp <= timestamp)
         .filter(PositionSnapshot.leverage.isnot(None))
         .filter(PositionSnapshot.size > 0)
     )
-    
+
     if wallet_id:
-        query = query.filter(PositionSnapshot.wallet_id == wallet_id)
-    
-    # Get the most recent leverage value before or at the trade timestamp
-    result = query.order_by(desc(PositionSnapshot.timestamp)).first()
-    
+        query_before = query_before.filter(PositionSnapshot.wallet_id == wallet_id)
+
+    result = query_before.order_by(desc(PositionSnapshot.timestamp)).first()
+
     if result and result[0] is not None:
-        return float(result[0])
-    
-    return None
+        return (float(result[0]), float(result[1]) if result[1] is not None else None)
+
+    # If no snapshot before, try after (within 1 hour) - handles case where trade closed before logger ran
+    from datetime import timedelta
+    query_after = (
+        session.query(PositionSnapshot.leverage, PositionSnapshot.equity_used)
+        .filter(PositionSnapshot.symbol == normalize_symbol(symbol))
+        .filter(PositionSnapshot.timestamp > timestamp)
+        .filter(PositionSnapshot.timestamp <= timestamp + timedelta(hours=1))
+        .filter(PositionSnapshot.leverage.isnot(None))
+        .filter(PositionSnapshot.size > 0)
+    )
+
+    if wallet_id:
+        query_after = query_after.filter(PositionSnapshot.wallet_id == wallet_id)
+
+    result = query_after.order_by(PositionSnapshot.timestamp.asc()).first()
+
+    if result and result[0] is not None:
+        return (float(result[0]), float(result[1]) if result[1] is not None else None)
+
+    return (None, None)
 
 
 def get_aggregated_closed_trades(session: Session, symbol: Optional[str] = None, wallet_id: Optional[int] = None) -> List[ClosedTradeDict]:

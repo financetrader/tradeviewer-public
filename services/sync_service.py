@@ -28,8 +28,8 @@ def sync_closed_trades_from_fills(session: Session, fills: List[Dict[str, Any]],
             if wallet_id and sym:
                 strategy_id = resolve_strategy_id(session, wallet_id, sym, ts)
 
-            # Look up leverage from position snapshots (calculated when position was open)
-            leverage = queries.get_leverage_at_timestamp(session, wallet_id, sym, ts)
+            # Look up leverage and equity_used from position snapshots (calculated when position was open)
+            leverage, equity_used = queries.get_leverage_at_timestamp(session, wallet_id, sym, ts)
 
             data = {
                 'timestamp': ts,
@@ -44,7 +44,7 @@ def sync_closed_trades_from_fills(session: Session, fills: List[Dict[str, Any]],
                 'open_fee': None,
                 'liquidate_fee': None,
                 'exit_type': o.get('status'),
-                'equity_used': 0.0,
+                'equity_used': equity_used,
                 'leverage': leverage,
                 'strategy_id': strategy_id,  # Add resolved strategy_id
                 'reduce_only': o.get('reduceOnly'),  # True if closing position, False if opening
