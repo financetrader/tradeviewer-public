@@ -269,19 +269,41 @@ def run_scheduler():
         log_equity_and_pnl()
         log_positions_for_all_wallets()
 
-        # Also periodically sync closed trades from API into DB
+        # Also periodically sync closed trades from API into DB for all wallets
         try:
-            client, wallet_id = WalletService.get_admin_wallet_client_and_id()
             from services.apex_client import get_all_fills
             from services.sync_service import sync_closed_trades_from_fills
             from services.aggregation_service import sync_aggregated_trades
-            fills = get_all_fills(client)
-            with get_session() as session:
-                count = sync_closed_trades_from_fills(session, fills, wallet_id)
-                # Aggregate new closed trades into aggregated_trades table
-                agg_count = sync_aggregated_trades(session, wallet_id=wallet_id)
-                session.commit()
-            print(f"Synced {count} closed trades from fills, aggregated into {agg_count} trades")
+
+            # Get all Apex wallets (only Apex has fills API)
+            apex_wallets = [w for w in wallets if w['provider'] == 'apex_omni']
+
+            total_synced = 0
+            total_aggregated = 0
+
+            for wallet in apex_wallets:
+                try:
+                    wallet_id = wallet['id']
+                    # Get client for this wallet
+                    client = WalletService.get_wallet_client_by_id(wallet_id, with_logging=False)
+
+                    # Fetch fills from API
+                    fills = get_all_fills(client)
+
+                    with get_session() as session:
+                        count = sync_closed_trades_from_fills(session, fills, wallet_id)
+                        # Aggregate new closed trades into aggregated_trades table
+                        agg_count = sync_aggregated_trades(session, wallet_id=wallet_id)
+                        session.commit()
+
+                    total_synced += count
+                    total_aggregated += agg_count
+                    print(f"Wallet {wallet['name']}: Synced {count} closed trades, aggregated into {agg_count} trades")
+
+                except Exception as wallet_error:
+                    print(f"Error syncing trades for wallet {wallet.get('name', wallet_id)}: {wallet_error}")
+
+            print(f"Total: Synced {total_synced} closed trades from {len(apex_wallets)} Apex wallets, aggregated into {total_aggregated} trades")
         except Exception as e:
             print(f"Error syncing closed trades: {e}")
 

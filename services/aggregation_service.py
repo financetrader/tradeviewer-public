@@ -51,11 +51,12 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
     closing_legs = closing_legs_explicit + unknown_legs  # Will filter unknown during matching
     opening_legs = opening_legs_explicit
 
-    # Build lookup for opening legs by (wallet_id, symbol, side)
+    # Build lookup for opening legs by (wallet_id, symbol)
+    # Don't group by side since SHORT positions have different sides for open/close
     from collections import defaultdict
     opening_lookup = defaultdict(list)
     for trade in opening_legs:
-        key = (trade.wallet_id, normalize_symbol(str(trade.symbol)), trade.side)
+        key = (trade.wallet_id, normalize_symbol(str(trade.symbol)))
         opening_lookup[key].append(trade)
 
     # Sort each group by timestamp (descending) for "most recent" matching
@@ -72,7 +73,9 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
             continue
 
         # Find matching opening leg
-        lookup_key = (closing_leg.wallet_id, normalize_symbol(str(closing_leg.symbol)), closing_leg.side)
+        # For SHORT positions: opening=SELL, closing=BUY
+        # For LONG positions: opening=BUY, closing=SELL
+        lookup_key = (closing_leg.wallet_id, normalize_symbol(str(closing_leg.symbol)))
         opening_candidates = opening_lookup.get(lookup_key, [])
 
         opening_leg = None
@@ -98,9 +101,14 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
 
         matched_closing_ids.add(closing_leg.id)
 
+        # Infer position side from opening leg
+        # If opening leg is BUY (reduce_only=False), it's a LONG position
+        # If opening leg is SELL (reduce_only=False), it's a SHORT position
+        position_side = "LONG" if opening_leg.side == "BUY" else "SHORT"
+
         # Calculate PnL from opening and closing prices
         size = abs(closing_leg.size)
-        if closing_leg.side == 'LONG':
+        if position_side == 'LONG':
             # LONG: profit when exit > entry
             pnl = (closing_leg.exit_price - opening_leg.entry_price) * size
         else:  # SHORT
@@ -122,7 +130,7 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
 
         if existing:
             # Update existing
-            existing.side = closing_leg.side
+            existing.side = position_side
             existing.size = size
             existing.avg_entry_price = opening_leg.entry_price
             existing.avg_exit_price = closing_leg.exit_price
@@ -142,7 +150,7 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
                 wallet_id=closing_leg.wallet_id,
                 timestamp=closing_leg.timestamp,  # Use closing timestamp as the trade completion time
                 symbol=lookup_key[1],
-                side=closing_leg.side,
+                side=position_side,
                 size=size,
                 avg_entry_price=opening_leg.entry_price,
                 avg_exit_price=closing_leg.exit_price,

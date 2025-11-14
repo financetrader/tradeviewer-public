@@ -764,6 +764,7 @@ def upsert_closed_trade(session: Session, data: ClosedTradeDataDict, wallet_id: 
         existing.equity_used = float(data['equity_used']) if data.get('equity_used') else existing.equity_used  # type: ignore
         existing.leverage = float(data['leverage']) if data.get('leverage') is not None else getattr(existing, 'leverage', None)  # type: ignore
         existing.strategy_id = data.get('strategy_id')  # type: ignore  # Update strategy_id
+        existing.reduce_only = data.get('reduce_only')  # type: ignore  # Update reduce_only flag
         return existing
 
     trade = ClosedTrade(
