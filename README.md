@@ -61,7 +61,8 @@ Press `Ctrl+C` in the terminal
 - **Performance Attribution**: Track which trades belong to which strategies
 
 ### Detailed Wallet View (`/wallet/<id>`)
-- **Real-Time Data**: Current positions, balances, and open orders
+- **Cached Data Display**: Current positions, balances, and open orders from database
+- **Async Refresh**: Automatic refresh on page load and manual refresh button
 - **Historical Charts**: Equity over time, per-symbol P&L tracking
 - **Trade History**: Complete fill history with fees and position sizing
 - **Closed P&L**: Detailed closed trade analysis with entry/exit prices
@@ -103,25 +104,47 @@ See `env.example` for a complete list of available environment variables.
 
 ## Data Logging & Synchronization
 
-The application automatically logs and synchronizes data so the dashboard stays current.
+The application uses a database-centric, asynchronous refresh architecture. Dashboards read from the database immediately, then refresh data in the background.
+
+### Data Refresh Architecture
+
+**How It Works:**
+1. **Page Load**: Dashboard routes read all data from the database (no blocking API calls)
+2. **Async Refresh**: JavaScript automatically triggers refresh in background on page load
+3. **Manual Refresh**: Each dashboard has a refresh button showing last update time
+4. **Background Scheduler**: All wallets refresh every 30 minutes automatically
+5. **Centralized Service**: All refresh logic in `services/wallet_refresh.py`
+
+**Refresh Endpoints:**
+- `POST /api/wallet/<id>/refresh` - Refresh single wallet
+- `POST /api/wallets/refresh-all` - Refresh all wallets (from portfolio overview)
+
+**Benefits:**
+- Fast page loads (no waiting for API calls)
+- Non-blocking UI (refresh happens in background)
+- Always shows data (even if API is slow/down)
+- Manual control (refresh button on each dashboard)
 
 ### Equity Snapshots
-- Frequency: every 30 minutes (background logger) and on every dashboard page load/refresh
+- Frequency: every 30 minutes (background logger) and on-demand via refresh button
 - Data: total equity, unrealized PnL, available balance, realized PnL
-- Source: live API balance data
+- Source: live API balance data (fetched asynchronously, stored in database)
+- Page load: Dashboard displays cached data from database immediately, then triggers async refresh in background
 - When offline: no points are written → the equity chart shows visible gaps (broken lines) for missing periods
 
 ### Closed Trades / Realized PnL
-- Frequency: every 30 minutes (background logger) and on every dashboard page load/refresh
+- Frequency: every 30 minutes (background logger) and on-demand via refresh button
 - Data: all historical fills (closed trades) fetched from the exchange
-- Source: exchange historical trade API
+- Source: exchange historical trade API (fetched asynchronously, stored in database)
+- Page load: Dashboard displays cached data from database immediately, then triggers async refresh in background
 - When offline: no gaps; realized PnL only changes when trades close, so charts render a flat horizontal line until the next closed trade
 - Recovery: when the server restarts, the next refresh/30‑minute cycle re-syncs all historical closed trades from the exchange
 
 ### Background Logger
 
 The background logger runs automatically when you start the application. It:
-- Writes equity snapshots every 30 minutes (:00 and :30 past each hour)
+- Refreshes all wallets every 30 minutes using `refresh_wallet_data()` (:00 and :30 past each hour)
+- Writes equity snapshots and position data to database
 - Syncs closed trades from exchange API every 30 minutes
 - Runs in a separate background thread (non-blocking)
 - Starts automatically with the application

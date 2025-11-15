@@ -528,7 +528,7 @@ ps aux | grep app.py
 **Background logger not running:**
 - The background logger runs automatically when the application starts
 - Check the logs in `logs/exchange_traffic.log`
-- The logger runs every 30 minutes and logs to the database
+- The logger runs every 30 minutes and refreshes all wallets using `refresh_wallet_data()`, storing data to the database
 
 ---
 
