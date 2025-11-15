@@ -1034,6 +1034,37 @@
                 setTimeout(() => popup.remove(), 300);
             }, 3000);
         }
+        
+        // Auto-refresh on page load (non-blocking)
+        document.addEventListener('DOMContentLoaded', function() {
+            // Give the page 300ms to render with cached data first
+            setTimeout(() => {
+                // Only auto-refresh if data is stale (> 30 minutes old) or missing
+                const lastUpdateText = document.querySelector('#refreshBtn div');
+                if (lastUpdateText) {
+                    const lastUpdate = lastUpdateText.textContent;
+                    // Parse timestamp and check if stale
+                    if (lastUpdate === 'Never' || isDataStale(lastUpdate)) {
+                        console.log('Auto-refreshing stale wallet data...');
+                        refreshWallet();
+                    } else {
+                        console.log('Wallet data is fresh, skipping auto-refresh');
+                    }
+                }
+            }, 300);
+        });
+        
+        // Check if data is stale (> 30 minutes old)
+        function isDataStale(timestampStr) {
+            try {
+                const lastUpdate = new Date(timestampStr);
+                const now = new Date();
+                const diffMinutes = (now - lastUpdate) / 1000 / 60;
+                return diffMinutes > 30;
+            } catch (e) {
+                return true; // If parse fails, assume stale
+            }
+        }
         </script>
 
 {% endblock %}

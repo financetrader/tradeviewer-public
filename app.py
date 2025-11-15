@@ -387,15 +387,15 @@ def wallet_dashboard(wallet_id):
             provider = wallet.provider
             wallet_address = wallet.wallet_address
         
-        # Refresh wallet data from API on page load
-        from services.wallet_refresh import refresh_wallet_data, get_wallet_last_refresh_time
-        success, error_msg, refresh_time = refresh_wallet_data(wallet_id)
-        
-        if not success:
-            flash(f'Failed to refresh wallet data: {error_msg}', 'error')
+        # No refresh on page load - let JavaScript handle it async
+        from services.wallet_refresh import get_wallet_last_refresh_time
         
         # Get last refresh time (from DB)
         last_refresh_time = get_wallet_last_refresh_time(wallet_id)
+        
+        # If no historical data, show info message
+        if not last_refresh_time:
+            flash('Loading fresh wallet data...', 'info')
         
         # Now read all display data from database (no API calls)
         with get_session() as session:
