@@ -694,17 +694,20 @@ def edit_wallet(wallet_id):
                 # Provider-specific fields (track if credentials changed)
                 if 'api_key' in request.form:
                     new_api_key = sanitize_string(request.form.get('api_key', ''), max_length=1000, allow_empty=True) or None
-                    if new_api_key != wallet.api_key:
+                    # If a value was provided, always treat as changed (handles encryption key mismatch)
+                    if new_api_key:
                         credentials_changed = True
                     wallet.api_key = new_api_key
                 if 'api_secret' in request.form:
                     new_api_secret = sanitize_string(request.form.get('api_secret', ''), max_length=1000, allow_empty=True) or None
-                    if new_api_secret != wallet.api_secret:
+                    # If a value was provided, always treat as changed (handles encryption key mismatch)
+                    if new_api_secret:
                         credentials_changed = True
                     wallet.api_secret = new_api_secret
                 if 'api_passphrase' in request.form:
                     new_api_passphrase = sanitize_string(request.form.get('api_passphrase', ''), max_length=1000, allow_empty=True) or None
-                    if new_api_passphrase != wallet.api_passphrase:
+                    # If a value was provided, always treat as changed (handles encryption key mismatch)
+                    if new_api_passphrase:
                         credentials_changed = True
                     wallet.api_passphrase = new_api_passphrase
                 if 'wallet_address' in request.form:
