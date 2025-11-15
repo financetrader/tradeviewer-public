@@ -361,9 +361,12 @@ def index():
 @app.route("/wallet/<int:wallet_id>")
 def wallet_dashboard(wallet_id):
     """Dashboard for specific wallet."""
+    app.logger.info(f"=== Starting wallet_dashboard for wallet_id: {wallet_id} ===")
+    
     # Validate wallet_id from URL
     wallet_id = sanitize_integer(wallet_id, default=0, min_val=1)
     if wallet_id == 0:
+        app.logger.error(f"Invalid wallet ID: {wallet_id}")
         flash('Invalid wallet ID', 'error')
         return redirect(url_for('admin'))
     
@@ -375,10 +378,12 @@ def wallet_dashboard(wallet_id):
         with get_session() as session:
             wallet = session.query(WalletConfig).filter(WalletConfig.id == wallet_id).first()
             if not wallet:
+                app.logger.error(f"Wallet {wallet_id} not found in database")
                 flash(f'Wallet not found', 'error')
                 return redirect(url_for('admin'))
 
             if wallet.status != 'connected':
+                app.logger.error(f'Wallet "{wallet.name}" status is {wallet.status}, not connected')
                 flash(f'Wallet "{wallet.name}" is not connected. Please test the connection first.', 'error')
                 return redirect(url_for('admin'))
 
@@ -386,6 +391,7 @@ def wallet_dashboard(wallet_id):
             wallet_name = wallet.name
             provider = wallet.provider
             wallet_address = wallet.wallet_address
+            app.logger.info(f"Found wallet: {wallet_name}, provider: {provider}, status: {wallet.status}")
         
         # No refresh on page load - let JavaScript handle it async
         from services.wallet_refresh import get_wallet_last_refresh_time
@@ -398,6 +404,7 @@ def wallet_dashboard(wallet_id):
             flash('Loading fresh wallet data...', 'info')
         
         # Now read all display data from database (no API calls)
+        app.logger.info(f"Reading display data from database for wallet {wallet_id}")
         with get_session() as session:
             from db.models import EquitySnapshot
             from sqlalchemy import desc
@@ -406,6 +413,7 @@ def wallet_dashboard(wallet_id):
             latest_snapshot = session.query(EquitySnapshot).filter(
                 EquitySnapshot.wallet_id == wallet_id
             ).order_by(desc(EquitySnapshot.timestamp)).first()
+            app.logger.info(f"Latest equity snapshot: {latest_snapshot}")
             
             if latest_snapshot:
                 balance_data = {
@@ -428,9 +436,15 @@ def wallet_dashboard(wallet_id):
             
             # Get open positions from database (includes timeInTrade and strategy_name)
             positions = queries.get_open_positions(session, wallet_id=wallet_id)
+            app.logger.info(f"Found {len(positions)} open positions")
+            if positions:
+                app.logger.debug(f"First position fields: {list(positions[0].keys())}")
             
             # Get closed trades for display
             closed_trades = queries.get_aggregated_closed_trades(session, wallet_id=wallet_id)
+            app.logger.info(f"Found {len(closed_trades)} closed trades")
+            if closed_trades:
+                app.logger.debug(f"First trade fields: {list(closed_trades[0].keys())}")
             
             # Get fills for display (from closed_trades table)
             fills_raw = queries.get_closed_trades(session, wallet_id=wallet_id)
@@ -456,6 +470,7 @@ def wallet_dashboard(wallet_id):
         # Format last update time
         last_update = last_refresh_time.strftime("%Y-%m-%d %H:%M:%S") if last_refresh_time else "Never"
         
+        app.logger.info(f"Rendering dashboard template with positions={len(positions)}, trades={len(closed_trades)}")
         return render_template('dashboard.html',
                              wallet_id=wallet_id,
                              wallet_name=wallet_name,
