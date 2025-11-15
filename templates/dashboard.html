@@ -253,18 +253,18 @@
                         <td><strong>{{ pos.symbol }}</strong></td>
                         <td><span class="badge badge-{{ pos.side|lower }}">{{ pos.side }}</span></td>
                         <td>{{ pos.size }}</td>
-                        <td><em>{% if pos.equityUsed is not none %}${{ "%.2f"|format(pos.equityUsed) }}{% else %}-{% endif %}</em></td>
-                        <td>${{ "%.2f"|format(pos.positionSizeUsd) }}</td>
-                        <td>${{ "%.2f"|format(pos.entryPrice|float) }}</td>
-                        <td>{% if pos.currentPrice %}${{ "%.2f"|format(pos.currentPrice) }}{% else %}-{% endif %}</td>
+                        <td><em>{% if pos.equity_used is not none %}${{ "%.2f"|format(pos.equity_used) }}{% else %}-{% endif %}</em></td>
+                        <td>${{ "%.2f"|format(pos.position_size_usd) }}</td>
+                        <td>${{ "%.2f"|format(pos.entry_price|float) }}</td>
+                        <td>{% if pos.current_price %}${{ "%.2f"|format(pos.current_price) }}{% else %}-{% endif %}</td>
                         <td>{% if pos.leverage %}{{ "%.1f"|format(pos.leverage) }}x{% else %}-{% endif %}</td>
-                        <td class="{% if pos.unrealizedPnl >= 0 %}positive{% else %}negative{% endif %}">
-                            ${{ "%.2f"|format(pos.unrealizedPnl) }}
+                        <td class="{% if pos.unrealized_pnl >= 0 %}positive{% else %}negative{% endif %}">
+                            ${{ "%.2f"|format(pos.unrealized_pnl) }}
                         </td>
-                        <td class="{% if pos.fundingFee|float >= 0 %}positive{% else %}negative{% endif %}">
-                            ${{ "%.2f"|format(pos.fundingFee|float) }}
+                        <td class="{% if pos.funding_fee|float >= 0 %}positive{% else %}negative{% endif %}">
+                            ${{ "%.2f"|format(pos.funding_fee|float) }}
                         </td>
-                        <td style="font-size: 0.85rem;">{{ pos.openedFormatted }}</td>
+                        <td style="font-size: 0.85rem;">{{ pos.opened_formatted }}</td>
                         <td style="font-size: 0.85rem; color: #00d4ff;">
                             {% if pos.strategy_name %}{{ pos.strategy_name }}{% else %}-{% endif %}
                             {% if pos.timeInTrade is defined and pos.timeInTrade and pos.timeInTrade != "-" and pos.timeInTrade != "" %}
@@ -359,18 +359,18 @@
                     <tbody>
                         {% for pnl in closed_pnl %}
                         <tr>
-                            <td style="font-size: 0.85rem;">{{ pnl.createdAtFormatted }}</td>
+                            <td style="font-size: 0.85rem;">{{ pnl.created_at_formatted }}</td>
                             <td><span class="badge badge-{{ pnl.side|lower }}">{{ pnl.side }}</span></td>
                             <td><strong>{{ pnl.symbol }}</strong></td>
                             <td>{{ pnl.size }}</td>
-                            <td><em>{% if pnl.equityUsed is defined and pnl.equityUsed is not none %}${{ "%.2f"|format(pnl.equityUsed) }}{% else %}-{% endif %}</em></td>
+                            <td><em>{% if pnl.equity_used is defined and pnl.equity_used is not none %}${{ "%.2f"|format(pnl.equity_used) }}{% else %}-{% endif %}</em></td>
                             <td>${{ "%.2f"|format((pnl.price|float * pnl.size|float)) }}</td>
                             <td>${{ "%.2f"|format(pnl.price|float) }}</td>
-                            <td>${{ "%.2f"|format(pnl.exitPrice|float) }}</td>
-                            <td><span class="badge badge-{{ pnl.tradeType|lower }}">{{ pnl.tradeType }}</span></td>
+                            <td>${{ "%.2f"|format(pnl.exit_price|float) }}</td>
+                            <td><span class="badge badge-{{ pnl.trade_type|lower }}">{{ pnl.trade_type }}</span></td>
                             <td>{% if pnl.leverage %}{{ "%.1f"|format(pnl.leverage) }}x{% else %}-{% endif %}</td>
-                            <td class="{% if pnl.totalPnl|float >= 0 %}positive{% else %}negative{% endif %}">
-                                ${{ "%.2f"|format(pnl.totalPnl|float) }}
+                            <td class="{% if pnl.total_pnl|float >= 0 %}positive{% else %}negative{% endif %}">
+                                ${{ "%.2f"|format(pnl.total_pnl|float) }}
                             </td>
                             <td style="font-size: 0.85rem; color: #00d4ff;">
                                 {% if pnl.strategy_name %}{{ pnl.strategy_name }}{% else %}-{% endif %}
