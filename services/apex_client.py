@@ -21,6 +21,10 @@ class LoggingApexClient:
         self._log = get_exchange_logger()
         self._exchange = "ApexOmni"
 
+    def __getattr__(self, name):
+        """Delegate any undefined method calls to the inner client."""
+        return getattr(self._inner, name)
+
     def _log_call(self, method: str, params: Dict[str, Any], response: Any, extra: Dict[str, Any] = None):
         payload = {
             "exchange": self._exchange,
