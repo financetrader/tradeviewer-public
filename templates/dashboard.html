@@ -79,13 +79,9 @@
     </div>
     {% endif %}
 
-    <div style="text-align: right;">
-        <div style="font-size: 0.75rem; color: #8b92b0;">Last Updated</div>
-        <div style="font-size: 0.9rem; color: #00d4ff; font-weight: 600;">{{ last_update }}</div>
-    </div>
-
-    <button onclick="location.reload()" class="btn" style="padding: 10px 18px;">
-        🔄 Refresh
+    <button onclick="refreshWallet()" class="btn" id="refreshBtn" style="padding: 10px 18px; position: relative;" title="Last refresh: {{ last_update }}">
+        <span id="refreshBtnText">🔄 Refresh</span>
+        <div style="font-size: 0.75rem; margin-top: 4px; opacity: 0.7;">{{ last_update }}</div>
     </button>
 
     {% if current_user and current_user.is_authenticated %}
@@ -964,6 +960,79 @@
             if (walletId) {
                 window.location.href = `/wallet/${walletId}`;
             }
+        }
+        
+        // Refresh wallet data via AJAX
+        function refreshWallet() {
+            const btn = document.getElementById('refreshBtn');
+            const btnText = document.getElementById('refreshBtnText');
+            const originalText = btnText.innerHTML;
+            
+            // Show loading state
+            btn.disabled = true;
+            btnText.innerHTML = '⏳ Refreshing...';
+            
+            fetch('/api/wallet/{{ wallet_id }}/refresh', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Update last update time
+                    const timeDiv = btn.querySelector('div');
+                    if (timeDiv && data.formatted_time) {
+                        timeDiv.textContent = data.formatted_time;
+                    }
+                    btn.setAttribute('title', 'Last refresh: ' + (data.formatted_time || ''));
+                    
+                    // Show success message
+                    showPopup('✓ Wallet refreshed successfully', 'success');
+                    
+                    // Reload page after short delay to show updated data
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1000);
+                } else {
+                    showPopup('✗ Refresh failed: ' + (data.error || 'Unknown error'), 'error');
+                    btn.disabled = false;
+                    btnText.innerHTML = originalText;
+                }
+            })
+            .catch(error => {
+                console.error('Refresh error:', error);
+                showPopup('✗ Refresh failed: ' + error.message, 'error');
+                btn.disabled = false;
+                btnText.innerHTML = originalText;
+            });
+        }
+        
+        // Show popup message
+        function showPopup(message, type) {
+            const popup = document.createElement('div');
+            popup.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                background: ${type === 'success' ? '#00ff88' : '#ff4757'};
+                color: ${type === 'success' ? '#0a0e27' : '#fff'};
+                border-radius: 6px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 10000;
+                font-weight: 600;
+                max-width: 400px;
+            `;
+            popup.textContent = message;
+            document.body.appendChild(popup);
+            
+            setTimeout(() => {
+                popup.style.opacity = '0';
+                popup.style.transition = 'opacity 0.3s';
+                setTimeout(() => popup.remove(), 300);
+            }, 3000);
         }
         </script>
 

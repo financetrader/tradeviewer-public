@@ -231,11 +231,12 @@ def debug_dashboard():
 
 @app.route("/")
 def index():
-    """Portfolio overview dashboard with aggregated metrics."""
+    """Portfolio overview dashboard with aggregated metrics (read-only from database)."""
     try:
         start, end = _parse_time_range()
         all_wallets = WalletService.get_all_connected_wallets()
 
+        # Read all data from database only (no API calls)
         with get_session() as session:
             latest_equity = queries.get_latest_equity_per_wallet(session)
             latest_unrealized = queries.get_latest_unrealized_pnl_per_wallet(session)
@@ -272,75 +273,8 @@ def index():
             # Recent activity
             recent_trades = queries.get_recent_trades(session, limit=10)
 
-            # Open positions
+            # Open positions (includes timeInTrade and strategy_name from get_open_positions)
             open_positions = queries.get_open_positions(session)
-
-            # Resolve strategy names for open positions and add timeInTrade
-            from db.models import PositionSnapshot
-            from sqlalchemy import func
-            for pos in open_positions:
-                wallet_id = pos.get('wallet_id')
-                symbol = pos.get('symbol')
-                if wallet_id and symbol:
-                    strategy_id = resolve_strategy_id(
-                        session,
-                        wallet_id,
-                        symbol,
-                        datetime.now()
-                    )
-                    if strategy_id:
-                        strategy = session.query(Strategy).filter(Strategy.id == strategy_id).first()
-                        pos['strategy_name'] = strategy.name if strategy else None
-                    else:
-                        pos['strategy_name'] = None
-                else:
-                    pos['strategy_name'] = None
-                
-                # Calculate timeInTrade directly from openedFormatted timestamp if available
-                # Note: open_positions from get_open_positions() may not have openedFormatted
-                # So we'll use database query as primary method for overview page
-                # BUG FIX: Find the most recent time when position transitioned from size=0 to size>0
-                symbol = pos.get('symbol', '')
-                if symbol and wallet_id:
-                    normalized_symbol = normalize_symbol(symbol)
-                    
-                    # Find the most recent time when position transitioned from size=0 to size>0
-                    # Step 1: Find the most recent snapshot with size = 0 (position was closed)
-                    last_zero_ts = session.query(func.max(PositionSnapshot.timestamp))\
-                        .filter(PositionSnapshot.wallet_id == wallet_id)\
-                        .filter(PositionSnapshot.symbol == normalized_symbol)\
-                        .filter(PositionSnapshot.size == 0)\
-                        .scalar()
-                    
-                    # Step 2: Find the earliest snapshot with size > 0 after the last_zero_ts
-                    # This gives us when the current position was opened
-                    if last_zero_ts:
-                        earliest = session.query(func.min(PositionSnapshot.timestamp))\
-                            .filter(PositionSnapshot.wallet_id == wallet_id)\
-                            .filter(PositionSnapshot.symbol == normalized_symbol)\
-                            .filter(PositionSnapshot.size > 0)\
-                            .filter(PositionSnapshot.timestamp > last_zero_ts)\
-                            .scalar()
-                    else:
-                        # No zero-size snapshot found, use earliest snapshot with size > 0
-                        # (position was never closed, or no history of closures)
-                        earliest = session.query(func.min(PositionSnapshot.timestamp))\
-                            .filter(PositionSnapshot.wallet_id == wallet_id)\
-                            .filter(PositionSnapshot.symbol == normalized_symbol)\
-                            .filter(PositionSnapshot.size > 0)\
-                            .scalar()
-                    
-                    if earliest:
-                        try:
-                            now = datetime.utcnow()
-                            duration_seconds = (now - earliest).total_seconds()
-                            pos['timeInTrade'] = format_duration(duration_seconds)
-                        except Exception:
-                            pos['timeInTrade'] = "-"
-                    else:
-                        pos['timeInTrade'] = "-"
-                else:
-                    pos['timeInTrade'] = "-"
 
             # Equity history for chart
             equity_history = queries.get_equity_history(session, wallet_id=None, hours=None)
@@ -453,511 +387,85 @@ def wallet_dashboard(wallet_id):
             provider = wallet.provider
             wallet_address = wallet.wallet_address
         
-        # Get client for this specific wallet
-        client = WalletService.get_wallet_client_by_id(wallet_id, with_logging=True)
+        # Refresh wallet data from API on page load
+        from services.wallet_refresh import refresh_wallet_data, get_wallet_last_refresh_time
+        success, error_msg, refresh_time = refresh_wallet_data(wallet_id)
         
-        # Fetch and enrich account data from API (provider-aware)
-        if provider == 'hyperliquid':
-            # Build read-only data using Hyperliquid client
-            try:
-                hl_balances = client.fetch_balances()
-            except Exception:
-                hl_balances = []
-            try:
-                hl_positions_raw = client.fetch_open_positions()
-            except Exception:
-                hl_positions_raw = []
-            try:
-                since_ms = int((datetime.now() - timedelta(days=90)).timestamp() * 1000)
-                hl_trades = client.fetch_trades(since_ms=since_ms, limit=1000)
-            except Exception:
-                hl_trades = []
+        if not success:
+            flash(f'Failed to refresh wallet data: {error_msg}', 'error')
+        
+        # Get last refresh time (from DB)
+        last_refresh_time = get_wallet_last_refresh_time(wallet_id)
+        
+        # Now read all display data from database (no API calls)
+        with get_session() as session:
+            from db.models import EquitySnapshot
+            from sqlalchemy import desc
             
-            # Get clearinghouse state for margin data
-            try:
-                hl_clearinghouse_state = client.fetch_clearinghouse_state()
-            except Exception:
-                hl_clearinghouse_state = {}
-
-            # Extract account equity and margin data
-            account_equity = 0.0
-            total_margin_used = 0.0
-            margin_summary = hl_clearinghouse_state.get('marginSummary', {})
+            # Get latest equity snapshot for balance data
+            latest_snapshot = session.query(EquitySnapshot).filter(
+                EquitySnapshot.wallet_id == wallet_id
+            ).order_by(desc(EquitySnapshot.timestamp)).first()
             
-            if margin_summary:
-                account_equity = float(margin_summary.get('accountValue', 0) or 0)
-                total_margin_used = float(margin_summary.get('totalMarginUsed', 0) or 0)
+            if latest_snapshot:
+                balance_data = {
+                    'totalEquityValue': float(latest_snapshot.total_equity or 0),
+                    'unrealizedPnl': float(latest_snapshot.unrealized_pnl or 0),
+                    'availableBalance': float(latest_snapshot.available_balance or 0),
+                    'realizedPnl': float(latest_snapshot.realized_pnl or 0),
+                    'initialMargin': float(latest_snapshot.initial_margin or 0) if latest_snapshot.initial_margin else None,
+                    'totalMarginUsed': float(latest_snapshot.initial_margin or 0) if latest_snapshot.initial_margin else None,
+                }
             else:
-                # Fallback: extract from balances
-                for b in hl_balances:
-                    asset = b.get('asset', '')
-                    amount = float(b.get('amount') or 0)
-                    if asset == 'USDC':
-                        account_equity = amount
-                        break
+                balance_data = {
+                    'totalEquityValue': 0,
+                    'unrealizedPnl': 0,
+                    'availableBalance': 0,
+                    'realizedPnl': 0,
+                    'initialMargin': None,
+                    'totalMarginUsed': None,
+                }
             
-            # Map HL positions to app format expected by templates and snapshots
-            hl_positions = []
-            for p in hl_positions_raw:
-                size = float(p.get('quantity') or 0)
-                entry_price = float(p.get('price') or 0)
-                position_size_usd = abs(size * entry_price)
-
-                # Calculate leverage for Hyperliquid positions using margin delta
-                leverage = None
-                equity_used = None
-                calculation_method = 'unknown'
-
-                if position_size_usd > 0:
-                    # Use margin delta method (same as logger and database storage)
-                    # For display purposes, we calculate this using the current margin data
-                    # The actual persisted leverage in the database comes from position_snapshots
-                    with get_session() as session:
-                        from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta as hl_calc_leverage
-                        leverage, equity_used, calculation_method = hl_calc_leverage(
-                            session, wallet_id, p.get('asset', ''),
-                            position_size_usd, total_margin_used, datetime.utcnow()
-                        )
-
-                hl_positions.append({
-                    'symbol': p.get('asset', ''),
-                    'side': p.get('side', ''),
-                    'size': abs(size),
-                    'entryPrice': entry_price,
-                    'currentPrice': None,
-                    'leverage': leverage,
-                    'unrealizedPnl': float(p.get('unrealized_pnl') or 0),
-                    'fundingFee': None,
-                    'equityUsed': equity_used,
-                    'positionSizeUsd': position_size_usd,
-                    'calculationMethod': calculation_method,
-                })
+            # Get open positions from database (includes timeInTrade and strategy_name)
+            positions = queries.get_open_positions(session, wallet_id=wallet_id)
             
-            # Add openedFormatted and timeInTrade for Hyperliquid positions
-            # Try to get earliest position snapshot from database for each position
-            # BUG FIX: Find the most recent time when position transitioned from size=0 to size>0
-            # This handles cases where positions were closed and reopened - we want the current
-            # position's open date, not the first time this symbol was ever opened
-            with get_session() as session:
-                from db.models import PositionSnapshot
-                from sqlalchemy import func
-                for pos in hl_positions:
-                    symbol = pos.get('symbol', '')
-                    if symbol:
-                        # Normalize symbol to match how it's stored in database
-                        normalized_symbol = normalize_symbol(symbol)
-                        
-                        # Find the most recent time when position transitioned from size=0 to size>0
-                        # Step 1: Find the most recent snapshot with size = 0 (position was closed)
-                        last_zero_ts = session.query(func.max(PositionSnapshot.timestamp))\
-                            .filter(PositionSnapshot.wallet_id == wallet_id)\
-                            .filter(PositionSnapshot.symbol == normalized_symbol)\
-                            .filter(PositionSnapshot.size == 0)\
-                            .scalar()
-                        
-                        # Step 2: Find the earliest snapshot with size > 0 after the last_zero_ts
-                        # This gives us when the current position was opened
-                        if last_zero_ts:
-                            opened_timestamp = session.query(func.min(PositionSnapshot.timestamp))\
-                                .filter(PositionSnapshot.wallet_id == wallet_id)\
-                                .filter(PositionSnapshot.symbol == normalized_symbol)\
-                                .filter(PositionSnapshot.size > 0)\
-                                .filter(PositionSnapshot.timestamp > last_zero_ts)\
-                                .scalar()
-                        else:
-                            # No zero-size snapshot found, use earliest snapshot with size > 0
-                            # (position was never closed, or no history of closures)
-                            opened_timestamp = session.query(func.min(PositionSnapshot.timestamp))\
-                                .filter(PositionSnapshot.wallet_id == wallet_id)\
-                                .filter(PositionSnapshot.symbol == normalized_symbol)\
-                                .filter(PositionSnapshot.size > 0)\
-                                .scalar()
-                        
-                        if opened_timestamp:
-                            try:
-                                pos['openedFormatted'] = opened_timestamp.strftime("%Y-%m-%d %H:%M")
-                                now = datetime.utcnow()
-                                duration_seconds = (now - opened_timestamp).total_seconds()
-                                pos['timeInTrade'] = format_duration(duration_seconds)
-                            except Exception:
-                                pos['openedFormatted'] = "-"
-                                pos['timeInTrade'] = "-"
-                        else:
-                            pos['openedFormatted'] = "-"
-                            pos['timeInTrade'] = "-"
-                    else:
-                        pos['openedFormatted'] = "-"
-                        pos['timeInTrade'] = "-"
-
-            # Build balance summary and wallet lists
-            total_equity = 0.0
-            available_balance = 0.0
-            total_unrealized = 0.0
-            contract_wallets = []
-
-            for b in hl_balances:
-                asset = b.get('asset', '')
-                amount = float(b.get('amount') or 0)
-                unrealized_pnl = float(b.get('unrealized_pnl') or 0)
-
-                # Add to wallet list for display
-                contract_wallets.append({
-                    'token': asset,
-                    'balance': amount,
-                    'availableBalance': amount,
-                    'pendingDepositAmount': 0.0,
-                    'pendingWithdrawAmount': 0.0,
-                })
-
-                if asset == 'USDC':
-                    total_equity += amount
-                    available_balance = amount
-                total_unrealized += unrealized_pnl
-
-            account_data = {
-                'contract_wallets': contract_wallets,
-                'spot_wallets': [],
-                'positions': hl_positions,
-                'balance_data': {
-                    'totalEquityValue': total_equity,
-                    'unrealizedPnl': total_unrealized,
-                    'availableBalance': available_balance,
-                    'realizedPnl': 0.0,
-                    'totalMarginUsed': total_margin_used,  # Add margin data for leverage calculation
-                },
-                'orders': [],
-                'closed_pnl': [],
-            }
-            # Keep raw trades for DB upsert; map a copy for UI
-            hl_trades_raw = list(hl_trades)
-            # Map HL trades to the template's fill structure
+            # Get closed trades for display
+            closed_trades = queries.get_aggregated_closed_trades(session, wallet_id=wallet_id)
+            
+            # Get fills for display (from closed_trades table)
+            fills_raw = queries.get_closed_trades(session, wallet_id=wallet_id)
             fills = []
-            def _normalize_side(raw: str) -> str:
-                s = (raw or '').lower()
-                if s in ('b', 'bid', 'buy', 'long'):
-                    return 'buy'
-                if s in ('a', 'ask', 'sell', 'short'):
-                    return 'sell'
-                return s or 'buy'
-            for t in hl_trades_raw:
-                ts = t.get('timestamp')
-                created_str = ts.strftime("%Y-%m-%d %H:%M") if ts else ""
+            for fill in fills_raw:
                 fills.append({
-                    'createdAtFormatted': created_str,
-                    'symbol': t.get('asset', ''),
-                    'side': _normalize_side(t.get('side', '')),
-                    'size': float(t.get('quantity') or 0),
-                    'price': float(t.get('price') or 0),
-                    'cumMatchFillFee': float(t.get('fee') or 0),
+                    'createdAtFormatted': fill.get('createdAtFormatted', ''),
+                    'symbol': fill.get('symbol', ''),
+                    'side': fill.get('side', ''),
+                    'size': float(fill.get('size') or 0),
+                    'price': float(fill.get('price') or 0),
+                    'cumMatchFillFee': float(fill.get('closeFee') or 0),
                     'type': 'trade',
                 })
-        else:
-            # Default Apex Omni flow
-            account_data = get_enriched_account_data(client)
             
-            # Fetch all fills and format timestamps
-            fills = get_all_fills(client)
-            format_fills_timestamps(fills)
-        
-        # Add strategy information to positions and orders
-        with get_session() as session:
-            from db.models import PositionSnapshot
-            from sqlalchemy import func
-            # For each position, resolve current strategy and ensure timeInTrade is set
-            for pos in account_data['positions']:
-                strategy_id = resolve_strategy_id(
-                    session, 
-                    wallet_id, 
-                    pos.get('symbol', ''), 
-                    datetime.now()
-                )
-                if strategy_id:
-                    strategy = session.query(Strategy).filter(Strategy.id == strategy_id).first()
-                    pos['strategy_name'] = strategy.name if strategy else None
-                else:
-                    pos['strategy_name'] = None
-                
-                # Calculate timeInTrade directly from openedFormatted timestamp
-                opened_str = pos.get('openedFormatted', '')
-                symbol = pos.get('symbol', '')
-                
-                # DEBUG: Log what we have initially
-                app.logger.info(f"DEBUG Position {symbol}: Initial openedFormatted='{opened_str}', size={pos.get('size')}")
-                
-                # Now using updatedTime from API which should have the correct date
-                # Always use API date if available
-                if opened_str and opened_str != "-" and len(str(opened_str)) > 10:
-                    try:
-                        opened_dt = datetime.strptime(str(opened_str), "%Y-%m-%d %H:%M")
-                        now = datetime.utcnow()
-                        duration_seconds = (now - opened_dt).total_seconds()
-                        if duration_seconds > 0:
-                            pos['timeInTrade'] = format_duration(duration_seconds)
-                        else:
-                            pos['timeInTrade'] = "-"
-                        app.logger.info(f"Position {symbol}: Using API openedFormatted={opened_str}, timeInTrade={pos['timeInTrade']}")
-                    except (ValueError, TypeError) as e:
-                        app.logger.warning(f"Could not parse openedFormatted '{opened_str}' for {symbol}: {e}")
-                        pos['timeInTrade'] = "-"
-                else:
-                    # Fallback to database if openedFormatted not available
-                    # BUG FIX: Find the most recent time when position transitioned from size=0 to size>0
-                    # This handles cases where positions were closed and reopened
-                    if symbol and wallet_id:
-                        normalized_symbol = normalize_symbol(symbol)
-                        
-                        # Find the most recent time when position transitioned from size=0 to size>0
-                        # Step 1: Find the most recent snapshot with size = 0 (position was closed)
-                        last_zero_ts = session.query(func.max(PositionSnapshot.timestamp))\
-                            .filter(PositionSnapshot.wallet_id == wallet_id)\
-                            .filter(PositionSnapshot.symbol == normalized_symbol)\
-                            .filter(PositionSnapshot.size == 0)\
-                            .scalar()
-                        
-                        # Step 2: Find the earliest snapshot with size > 0 after the last_zero_ts
-                        # This gives us when the current position was opened
-                        if last_zero_ts:
-                            opened_timestamp = session.query(func.min(PositionSnapshot.timestamp))\
-                                .filter(PositionSnapshot.wallet_id == wallet_id)\
-                                .filter(PositionSnapshot.symbol == normalized_symbol)\
-                                .filter(PositionSnapshot.size > 0)\
-                                .filter(PositionSnapshot.timestamp > last_zero_ts)\
-                                .scalar()
-                        else:
-                            # No zero-size snapshot found, use earliest snapshot with size > 0
-                            # (position was never closed, or no history of closures)
-                            opened_timestamp = session.query(func.min(PositionSnapshot.timestamp))\
-                                .filter(PositionSnapshot.wallet_id == wallet_id)\
-                                .filter(PositionSnapshot.symbol == normalized_symbol)\
-                                .filter(PositionSnapshot.size > 0)\
-                                .scalar()
-                        
-                        if opened_timestamp:
-                            try:
-                                now = datetime.utcnow()
-                                duration_seconds = (now - opened_timestamp).total_seconds()
-                                pos['timeInTrade'] = format_duration(duration_seconds)
-                                # Only set openedFormatted if it's not already set by the API
-                                current_opened = pos.get('openedFormatted', '')
-                                if not current_opened or current_opened == "-":
-                                    pos['openedFormatted'] = opened_timestamp.strftime("%Y-%m-%d %H:%M")
-                                    app.logger.info(f"Set openedFormatted from DB for {symbol}: {pos['openedFormatted']}")
-                            except Exception as e:
-                                app.logger.warning(f"Error calculating timeInTrade from DB for {symbol}: {e}")
-                                pos['timeInTrade'] = "-"
-                        else:
-                            pos['timeInTrade'] = "-"
-                    else:
-                        pos['timeInTrade'] = "-"
-                
-                # Ensure it's always set
-                if 'timeInTrade' not in pos:
-                    pos['timeInTrade'] = "-"
-            
-            # For each open order, resolve current strategy
-            for order in account_data['orders']:
-                strategy_id = resolve_strategy_id(
-                    session, 
-                    wallet_id, 
-                    order.get('symbol', ''), 
-                    datetime.now()
-                )
-                if strategy_id:
-                    strategy = session.query(Strategy).filter(Strategy.id == strategy_id).first()
-                    order['strategy_name'] = strategy.name if strategy else None
-                else:
-                    order['strategy_name'] = None
-            
-            # Format order timestamps
-            format_orders_timestamps(account_data['orders'])
-        
-        # Get historical data from database filtered by wallet
-        with get_session() as session:
-            # Write a fresh equity snapshot on page load/refresh
-            try:
-                balance = account_data.get('balance_data', {})
-                # Determine which margin field to use based on provider
-                if provider == 'apex_omni':
-                    margin_used = float(balance.get('initialMargin', 0) or 0)
-                elif provider == 'hyperliquid':
-                    margin_used = float(balance.get('totalMarginUsed', 0) or 0)
-                else:
-                    margin_used = None
-                
-                snapshot_data = {
-                    'wallet_id': wallet_id,
-                    'timestamp': datetime.utcnow(),
-                    'total_equity': float(balance.get('totalEquityValue', 0) or 0),
-                    'unrealized_pnl': float(balance.get('unrealizedPnl', 0) or 0),
-                    'available_balance': float(balance.get('availableBalance', 0) or 0),
-                    'realized_pnl': float(balance.get('realizedPnl', 0) or 0),
-                    'initial_margin': margin_used,  # Works for both Apex (initialMargin) and Hyperliquid (totalMarginUsed)
-                }
-                queries.insert_equity_snapshot(session, snapshot_data)
-                
-                # Also write position snapshots for each open position
-                timestamp = datetime.utcnow()
-                for pos in account_data['positions']:
-                    if pos.get('size') and float(pos.get('size', 0)) != 0:
-                        position_data = {
-                            'wallet_id': wallet_id,
-                            'timestamp': timestamp,
-                            'symbol': normalize_symbol(pos.get('symbol', '')) or '',
-                            'side': sanitize_string(pos.get('side', ''), max_length=10, allow_empty=False),
-                            'size': sanitize_float(pos.get('size', 0), default=0.0, min_val=0),
-                            'entry_price': sanitize_float(pos.get('entryPrice', 0) or 0, default=0.0, min_val=0),
-                            'current_price': sanitize_float(pos.get('currentPrice', 0) or 0, default=None, min_val=0) if pos.get('currentPrice') else None,
-                            'position_size_usd': sanitize_float(float(pos.get('size', 0) or 0) * float(pos.get('currentPrice', 0) or pos.get('entryPrice', 0) or 0), default=0.0, min_val=0),
-                            'leverage': sanitize_float(pos.get('leverage', 0), default=None, min_val=0) if pos.get('leverage') else None,
-                            'unrealized_pnl': sanitize_float(pos.get('unrealizedPnl', 0) or 0, default=0.0),
-                            'funding_fee': sanitize_float(pos.get('fundingFee', 0) or 0, default=0.0),
-                            'equity_used': sanitize_float(pos.get('equityUsed', 0), default=None, min_val=0) if pos.get('equityUsed') else None,
-                            'raw_data': pos  # Store complete position data from API
-                        }
-                        
-                        # Exchange-specific leverage calculation via margin tracking
-                        if provider == 'apex_omni':
-                            from services.apex_leverage_calculator import calculate_leverage_from_margin_delta
-                            
-                            symbol = normalize_symbol(pos.get('symbol', '')) or ''
-                            position_size_usd = float(position_data['position_size_usd'])
-                            current_initial_margin = float(balance.get('initialMargin', 0) or 0)
-                            
-                            try:
-                                leverage, equity_used, method = calculate_leverage_from_margin_delta(
-                                    session, wallet_id, symbol, position_size_usd,
-                                    current_initial_margin, timestamp, pos
-                                )
-                                
-                                # Override with calculated values if available
-                                if leverage is not None:
-                                    position_data['leverage'] = leverage
-                                if equity_used is not None:
-                                    position_data['equity_used'] = equity_used
-                                position_data['initial_margin_at_open'] = current_initial_margin
-                                position_data['calculation_method'] = method
-
-                                if leverage is not None:
-                                    app.logger.info(f"Apex leverage calc for {symbol}: {leverage:.1f}x via {method}")
-                                else:
-                                    app.logger.info(f"Apex leverage calc for {symbol}: calculation returned None (method: {method})")
-                            except Exception as e:
-                                app.logger.error(f"Error calculating Apex leverage for {symbol}: {e}")
-                                position_data['calculation_method'] = 'error'
-                        
-                        elif provider == 'hyperliquid':
-                            from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta as hl_calc_leverage
-                            
-                            symbol = normalize_symbol(pos.get('symbol', '')) or ''
-                            position_size_usd = float(position_data['position_size_usd'])
-                            current_margin_used = float(balance.get('totalMarginUsed', 0) or 0)
-                            
-                            try:
-                                leverage, equity_used, method = hl_calc_leverage(
-                                    session, wallet_id, symbol, position_size_usd,
-                                    current_margin_used, timestamp
-                                )
-                                
-                                # Override with calculated values if available
-                                if leverage is not None:
-                                    position_data['leverage'] = leverage
-                                if equity_used is not None:
-                                    position_data['equity_used'] = equity_used
-                                position_data['initial_margin_at_open'] = current_margin_used
-                                position_data['calculation_method'] = method
-                                
-                                app.logger.info(f"Hyperliquid leverage calc for {symbol}: {leverage:.1f}x via {method}")
-                            except Exception as e:
-                                app.logger.error(f"Error calculating Hyperliquid leverage for {symbol}: {e}")
-                                position_data['calculation_method'] = 'error'
-                        
-                        queries.insert_position_snapshot(session, position_data)
-
-                # For Hyperliquid, upsert trades (fills) into closed_trades
-                if provider == 'hyperliquid':
-                    for t in hl_trades_raw:
-                        try:
-                            ts = t.get('timestamp')
-                            raw_side = str(t.get('side') or '')
-                            price = float(t.get('price') or 0)
-                            size = float(t.get('quantity') or 0)
-                            # Normalize side for DB stored trades (buy/sell)
-                            norm_side = 'buy' if raw_side.lower() in ('b', 'bid', 'buy', 'long') else 'sell'
-                            queries.upsert_closed_trade(session, {
-                                'wallet_id': wallet_id,
-                                'timestamp': ts,
-                                'side': sanitize_string(norm_side, max_length=10, allow_empty=False),
-                                'symbol': validate_symbol(t.get('asset') or '') or '',
-                                'size': sanitize_float(abs(size), default=0.0, min_val=0),
-                                'entry_price': sanitize_float(price, default=0.0, min_val=0),
-                                'exit_price': sanitize_float(price, default=0.0, min_val=0),
-                                'trade_type': sanitize_string(norm_side, max_length=10, allow_empty=False),
-                                'closed_pnl': sanitize_float(t.get('realized_pnl') or 0, default=0.0),
-                                'close_fee': sanitize_float(t.get('fee') or 0, default=None, min_val=0),
-                                'open_fee': None,
-                                'liquidate_fee': None,
-                                'exit_type': None,
-                                'equity_used': None,
-                            }, wallet_id=wallet_id)
-                        except Exception as e:
-                            # Log but continue processing other trades
-                            print(f"Warning: Failed to upsert Hyperliquid trade for {t.get('asset')}: {e}")
-                            continue
-                
-                session.commit()
-            except Exception as e:
-                session.rollback()
-                print(f"Warning: Could not write snapshots: {e}")
-                pass
-
+            # Get historical data from database
             historical_data = get_historical_data(session, wallet_id=wallet_id)
-            # Build symbol PnL from database (closed trades)
             symbol_data = get_symbol_pnl_data(session, wallet_id=wallet_id)
-
-            # NEW: fetch aggregated closed trades for the Closed P&L table
-            # This uses aggregated_trades which groups fills by (wallet_id, timestamp, symbol)
-            closed_trades = queries.get_aggregated_closed_trades(session, wallet_id=wallet_id)
         
-        # Get current timestamp
-        last_update = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Get all connected wallets for dropdown
+        # Get all wallets for dropdown
         all_wallets = WalletService.get_all_connected_wallets()
         
-        # DEBUG: Log positions before rendering and ensure timeInTrade is set
-        app.logger.info(f"Rendering dashboard for wallet {wallet_id}, positions count: {len(account_data.get('positions', []))}")
-        for pos in account_data.get('positions', []):
-            symbol = pos.get('symbol', '')
-            timeInTrade = pos.get('timeInTrade', 'NOT SET')
-            openedFormatted = pos.get('openedFormatted', 'NOT SET')
-            app.logger.info(f"  Position {symbol}: timeInTrade='{timeInTrade}', openedFormatted='{openedFormatted}'")
-            
-            # Final check - if timeInTrade is still not set, calculate it now
-            if not timeInTrade or timeInTrade == 'NOT SET' or timeInTrade == '-':
-                if openedFormatted and openedFormatted != "-" and len(str(openedFormatted)) > 10:
-                    try:
-                        opened_dt = datetime.strptime(openedFormatted, "%Y-%m-%d %H:%M")
-                        now = datetime.utcnow()
-                        duration_seconds = (now - opened_dt).total_seconds()
-                        if duration_seconds > 0:
-                            pos['timeInTrade'] = format_duration(duration_seconds)
-                            app.logger.info(f"    Calculated timeInTrade='{pos['timeInTrade']}' for {symbol}")
-                    except Exception as e:
-                        app.logger.warning(f"    Failed to calculate timeInTrade for {symbol}: {e}")
-                        pos['timeInTrade'] = "-"
-                else:
-                    pos['timeInTrade'] = "-"
+        # Format last update time
+        last_update = last_refresh_time.strftime("%Y-%m-%d %H:%M:%S") if last_refresh_time else "Never"
         
         return render_template('dashboard.html',
                              wallet_id=wallet_id,
                              wallet_name=wallet_name,
                              network="MAIN",
                              all_wallets=all_wallets,
-                             contract_wallets=account_data['contract_wallets'],
-                             spot_wallets=account_data['spot_wallets'],
-                             positions=account_data['positions'],
-                             balance_data=account_data['balance_data'],
-                             orders=account_data['orders'],
+                             contract_wallets=[],
+                             spot_wallets=[],
+                             positions=positions,
+                             balance_data=balance_data,
+                             orders=[],
                              closed_pnl=closed_trades,
                              fills=fills,
                              equity_history=historical_data['equity_history'],
@@ -965,7 +473,8 @@ def wallet_dashboard(wallet_id):
                              symbol_realized_history=symbol_data['symbol_realized_history'],
                              total_realized_series=symbol_data['total_realized_series'],
                              symbols=symbol_data['symbols'],
-                             last_update=last_update)
+                             last_update=last_update,
+                             last_refresh_time=last_refresh_time)
     except WalletNotFoundError as e:
         app.logger.error(f"Wallet not found: {e}", exc_info=True)
         flash('Wallet not found. Please check the wallet ID.', 'error')
@@ -1675,6 +1184,98 @@ def admin_assign_strategy():
         app.logger.warning(f"Assignment errors: {errors}")
 
     return redirect(url_for('admin_strategies'))
+
+
+@app.route("/api/wallets/refresh-all", methods=['POST'])
+@limiter.limit(RATE_LIMITS['api'])
+@csrf.exempt
+def api_refresh_all_wallets():
+    """Refresh all connected wallets from their APIs."""
+    try:
+        from services.wallet_refresh import refresh_wallet_data
+        
+        all_wallets = WalletService.get_all_connected_wallets()
+        results = []
+        success_count = 0
+        error_count = 0
+        
+        for wallet in all_wallets:
+            wallet_id = wallet['id']
+            wallet_name = wallet['name']
+            
+            try:
+                success, error_msg, refresh_time = refresh_wallet_data(wallet_id)
+                
+                if success:
+                    success_count += 1
+                    results.append({
+                        'wallet_id': wallet_id,
+                        'wallet_name': wallet_name,
+                        'success': True,
+                        'timestamp': refresh_time.isoformat() if refresh_time else None
+                    })
+                else:
+                    error_count += 1
+                    results.append({
+                        'wallet_id': wallet_id,
+                        'wallet_name': wallet_name,
+                        'success': False,
+                        'error': error_msg
+                    })
+            except Exception as e:
+                error_count += 1
+                results.append({
+                    'wallet_id': wallet_id,
+                    'wallet_name': wallet_name,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'success': error_count == 0,
+            'results': results,
+            'summary': {
+                'total': len(all_wallets),
+                'succeeded': success_count,
+                'failed': error_count
+            }
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in refresh_all_wallets API: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route("/api/wallet/<int:wallet_id>/refresh", methods=['POST'])
+@limiter.limit(RATE_LIMITS['api'])
+@csrf.exempt
+def api_refresh_wallet(wallet_id):
+    """Refresh a specific wallet from its API."""
+    try:
+        from services.wallet_refresh import refresh_wallet_data, get_wallet_last_refresh_time
+        
+        # Validate wallet_id
+        wallet_id = sanitize_integer(wallet_id, default=0, min_val=1)
+        if wallet_id == 0:
+            return jsonify({'success': False, 'error': 'Invalid wallet ID'}), 400
+        
+        success, error_msg, refresh_time = refresh_wallet_data(wallet_id)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'timestamp': refresh_time.isoformat() if refresh_time else None,
+                'formatted_time': refresh_time.strftime("%Y-%m-%d %H:%M") if refresh_time else None
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': error_msg or 'Unknown error'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error in refresh_wallet API: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route("/api/symbol-suggestions", methods=['GET'])

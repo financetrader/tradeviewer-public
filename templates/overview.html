@@ -6,7 +6,11 @@
 <script src="/static/chart.min.js"></script>
 {% endblock %}
 
-{% block navbar_right %}{% endblock %}
+{% block navbar_right %}
+<button onclick="refreshAllWallets()" class="btn" id="refreshAllBtn" style="padding: 10px 18px;">
+    <span id="refreshAllBtnText">🔄 Refresh All Wallets</span>
+</button>
+{% endblock %}
 
 {% block breadcrumbs %}
 <div class="breadcrumbs">
@@ -642,6 +646,91 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// Refresh all wallets via AJAX
+function refreshAllWallets() {
+    const btn = document.getElementById('refreshAllBtn');
+    const btnText = document.getElementById('refreshAllBtnText');
+    const originalText = btnText.innerHTML;
+    
+    // Show loading state
+    btn.disabled = true;
+    btnText.innerHTML = '⏳ Refreshing all wallets...';
+    
+    fetch('/api/wallets/refresh-all', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const summary = data.summary;
+            showPopup(`✓ Refreshed ${summary.succeeded} wallet(s) successfully`, 'success');
+            
+            // Reload page after short delay to show updated data
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
+        } else {
+            const summary = data.summary || {total: 0, succeeded: 0, failed: 0};
+            let message = `Refresh completed: ${summary.succeeded} succeeded, ${summary.failed} failed`;
+            
+            // Show detailed errors
+            if (data.results) {
+                const errors = data.results.filter(r => !r.success);
+                if (errors.length > 0) {
+                    message += '\\n\\nErrors:\\n' + errors.map(e => `${e.wallet_name}: ${e.error}`).join('\\n');
+                }
+            }
+            
+            showPopup(message, summary.failed > 0 ? 'error' : 'success');
+            btn.disabled = false;
+            btnText.innerHTML = originalText;
+            
+            // Reload even if some failed
+            if (summary.succeeded > 0) {
+                setTimeout(() => {
+                    location.reload();
+                }, 3000);
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Refresh error:', error);
+        showPopup('✗ Refresh failed: ' + error.message, 'error');
+        btn.disabled = false;
+        btnText.innerHTML = originalText;
+    });
+}
+
+// Show popup message
+function showPopup(message, type) {
+    const popup = document.createElement('div');
+    popup.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        background: ${type === 'success' ? '#00ff88' : '#ff4757'};
+        color: ${type === 'success' ? '#0a0e27' : '#fff'};
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 10000;
+        font-weight: 600;
+        max-width: 500px;
+        white-space: pre-wrap;
+    `;
+    popup.textContent = message;
+    document.body.appendChild(popup);
+    
+    setTimeout(() => {
+        popup.style.opacity = '0';
+        popup.style.transition = 'opacity 0.3s';
+        setTimeout(() => popup.remove(), 300);
+    }, 5000);
+}
 </script>
 
 {% endblock %}

@@ -49,7 +49,26 @@ def log_positions_for_all_wallets():
                         account_data = get_enriched_account_data(client)
                         positions = account_data.get('positions', [])
                     elif provider == 'hyperliquid':
+                        # Fetch clearinghouse state (full API response) first to get raw data
+                        clearinghouse_state = client.fetch_clearinghouse_state()
+                        
+                        # Extract raw position objects from clearinghouse state
+                        # Map asset -> raw position object for storage
+                        raw_positions_dict = {}
+                        asset_positions = clearinghouse_state.get("assetPositions", [])
+                        for ap in asset_positions:
+                            if isinstance(ap, dict):
+                                pos = ap.get("position", {})
+                                if isinstance(pos, dict):
+                                    coin = pos.get("coin", "")
+                                    size = float(pos.get("szi", 0) or 0)
+                                    if size != 0 and coin:
+                                        # Store the full raw position object from API
+                                        raw_positions_dict[coin] = pos
+                        
+                        # Get processed positions for leverage calculation
                         positions_raw = client.fetch_open_positions()
+                        
                         # Get current account equity for leverage calculation
                         account_equity = queries.get_account_equity_at_timestamp(session, wallet_id, timestamp_dt)
                         
@@ -67,17 +86,20 @@ def log_positions_for_all_wallets():
                             except Exception as e:
                                 print(f"Warning: Failed to fetch balances for leverage calculation: {e}")
                         
-                        # Get clearinghouse state for margin data
-                        clearinghouse_state = client.fetch_clearinghouse_state()
+                        # Get margin data from clearinghouse state
                         margin_summary = clearinghouse_state.get('marginSummary', {})
                         current_margin_used = float(margin_summary.get('totalMarginUsed', 0) or 0)
 
                         # Map to standard format and calculate leverage
                         positions = []
                         for p in positions_raw:
+                            asset = p.get('asset', '')
                             size = float(p.get('quantity') or 0)
                             entry_price = float(p.get('price') or 0)
                             position_size_usd = abs(size * entry_price)
+
+                            # Get raw API position data (full position object from clearinghouse state)
+                            raw_position_data = raw_positions_dict.get(asset, {})
 
                             # Calculate leverage for Hyperliquid positions using margin delta
                             leverage = None
@@ -87,12 +109,12 @@ def log_positions_for_all_wallets():
                             if position_size_usd > 0:
                                 from services.hyperliquid_leverage_calculator import calculate_leverage_from_margin_delta
                                 leverage, equity_used, calculation_method = calculate_leverage_from_margin_delta(
-                                    session, wallet_id, p.get('asset', ''),
+                                    session, wallet_id, asset,
                                     position_size_usd, current_margin_used, timestamp_dt
                                 )
                             
                             positions.append({
-                                'symbol': p.get('asset', ''),
+                                'symbol': asset,
                                 'side': p.get('side', ''),
                                 'size': abs(size),
                                 'entryPrice': entry_price,
@@ -103,6 +125,7 @@ def log_positions_for_all_wallets():
                                 'equityUsed': equity_used,
                                 'positionSizeUsd': position_size_usd,
                                 'calculationMethod': calculation_method,
+                                '_raw_api_data': raw_position_data,  # Store ALL raw API position data
                             })
                     else:
                         continue
@@ -126,6 +149,7 @@ def log_positions_for_all_wallets():
                                     'funding_fee': float(pos.get('fundingFee', 0) or 0),
                                     'equity_used': float(pos.get('equityUsed', 0)) if pos.get('equityUsed') else None,
                                     'calculation_method': pos.get('calculationMethod', 'unknown'),
+                                    'raw_data': pos.get('_raw_api_data', {}),  # Store ALL raw API position data
                                 }
                                 queries.insert_position_snapshot(session, position_data)
                                 total_positions_logged += 1
@@ -234,8 +258,8 @@ def log_equity_and_pnl():
 
 
 def run_scheduler():
-    """Run the logger at :00 and :30 past each hour"""
-    print("Starting equity logger (synced to :00 and :30 past each hour)...")
+    """Run wallet refresh at :00 and :30 past each hour"""
+    print("Starting wallet refresh scheduler (synced to :00 and :30 past each hour)...")
     print(f"Logging to: Database (data/wallet.db)")
     
     # Calculate time until next :00 or :30
@@ -254,58 +278,55 @@ def run_scheduler():
     wait_seconds = wait_minutes * 60 - current_second
     
     if wait_seconds > 0:
-        print(f"Waiting {wait_minutes} minutes until :{target_minute:02d} to start logging...")
+        print(f"Waiting {wait_minutes} minutes until :{target_minute:02d} to start refreshing...")
         time.sleep(wait_seconds)
     
-    # Log immediately at the synchronized time
-    log_equity_and_pnl()
-    log_positions_for_all_wallets()
+    # Refresh immediately at the synchronized time
+    refresh_all_wallets()
 
-    # Then log every 30 minutes
+    # Then refresh every 30 minutes
     interval = 30 * 60  # 30 minutes in seconds
 
     while True:
         time.sleep(interval)
-        log_equity_and_pnl()
-        log_positions_for_all_wallets()
+        refresh_all_wallets()
 
-        # Also periodically sync closed trades from API into DB for all wallets
-        try:
-            from services.apex_client import get_all_fills
-            from services.sync_service import sync_closed_trades_from_fills
-            from services.aggregation_service import sync_aggregated_trades
 
-            # Get all Apex wallets (only Apex has fills API)
-            apex_wallets = [w for w in wallets if w['provider'] == 'apex_omni']
-
-            total_synced = 0
-            total_aggregated = 0
-
-            for wallet in apex_wallets:
-                try:
-                    wallet_id = wallet['id']
-                    # Get client for this wallet
-                    client = WalletService.get_wallet_client_by_id(wallet_id, with_logging=False)
-
-                    # Fetch fills from API
-                    fills = get_all_fills(client)
-
-                    with get_session() as session:
-                        count = sync_closed_trades_from_fills(session, fills, wallet_id)
-                        # Aggregate new closed trades into aggregated_trades table
-                        agg_count = sync_aggregated_trades(session, wallet_id=wallet_id)
-                        session.commit()
-
-                    total_synced += count
-                    total_aggregated += agg_count
-                    print(f"Wallet {wallet['name']}: Synced {count} closed trades, aggregated into {agg_count} trades")
-
-                except Exception as wallet_error:
-                    print(f"Error syncing trades for wallet {wallet.get('name', wallet_id)}: {wallet_error}")
-
-            print(f"Total: Synced {total_synced} closed trades from {len(apex_wallets)} Apex wallets, aggregated into {total_aggregated} trades")
-        except Exception as e:
-            print(f"Error syncing closed trades: {e}")
+def refresh_all_wallets():
+    """Refresh data for all connected wallets."""
+    try:
+        from services.wallet_refresh import refresh_wallet_data
+        
+        timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        wallets = WalletService.get_all_connected_wallets()
+        
+        print(f"\n[{timestamp_str}] Starting refresh for {len(wallets)} wallet(s)...")
+        
+        success_count = 0
+        error_count = 0
+        
+        for wallet in wallets:
+            wallet_id = wallet['id']
+            wallet_name = wallet['name']
+            
+            try:
+                success, error_msg, refresh_time = refresh_wallet_data(wallet_id)
+                
+                if success:
+                    success_count += 1
+                    print(f"[{timestamp_str}] ✓ {wallet_name}")
+                else:
+                    error_count += 1
+                    print(f"[{timestamp_str}] ✗ {wallet_name}: {error_msg}")
+                    
+            except Exception as e:
+                error_count += 1
+                print(f"[{timestamp_str}] ✗ {wallet_name}: {str(e)}")
+        
+        print(f"[{timestamp_str}] Refresh complete: {success_count} succeeded, {error_count} failed\n")
+        
+    except Exception as e:
+        print(f"Error in refresh_all_wallets: {e}")
 
 
 if __name__ == "__main__":

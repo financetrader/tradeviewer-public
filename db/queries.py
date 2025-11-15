@@ -681,6 +681,18 @@ def insert_position_snapshot(session: Session, data: PositionSnapshotDataDict) -
     # Calculate opened_at: when this position was first opened
     opened_at = None
     if wallet_id and current_size > 0:
+        # First, try to get API timestamp from raw_data (most accurate)
+        raw_data = data.get('raw_data')
+        api_timestamp = None
+        if raw_data and isinstance(raw_data, dict):
+            # Try Apex API timestamp fields
+            timestamp_ms = raw_data.get("updatedTime") or raw_data.get("createdAt")
+            if timestamp_ms:
+                try:
+                    api_timestamp = datetime.utcfromtimestamp(int(timestamp_ms) / 1000)
+                except (ValueError, TypeError):
+                    pass
+        
         # Check if this position already exists (has previous snapshots with size > 0)
         prev_snapshot = (
             session.query(PositionSnapshot)
@@ -695,8 +707,11 @@ def insert_position_snapshot(session: Session, data: PositionSnapshotDataDict) -
         if prev_snapshot and prev_snapshot.opened_at:
             # Position continues - use existing opened_at
             opened_at = prev_snapshot.opened_at
+        elif api_timestamp:
+            # New position - use API timestamp (most accurate)
+            opened_at = api_timestamp
         else:
-            # New position - set opened_at to current timestamp
+            # Fallback to current timestamp if API timestamp not available
             opened_at = current_timestamp
     
     snapshot = PositionSnapshot(
@@ -1381,6 +1396,20 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
 
     results = []
     for pos, wallet_name, strategy_name in query.all():
+        # Calculate time in trade from opened_at (uses API timestamps when available)
+        time_in_trade = None
+        opened_formatted = None
+        if pos.opened_at:
+            try:
+                from services.data_service import format_duration
+                now = datetime.utcnow()
+                duration_seconds = (now - pos.opened_at).total_seconds()
+                if duration_seconds > 0:
+                    time_in_trade = format_duration(duration_seconds)
+                    opened_formatted = pos.opened_at.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                pass
+        
         results.append({
             'wallet_id': pos.wallet_id,
             'wallet_name': wallet_name,
@@ -1395,6 +1424,9 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
             'equity_used': float(pos.equity_used) if pos.equity_used is not None else None,
             'strategy_name': strategy_name,
             'timestamp': pos.timestamp,
+            'opened_at': pos.opened_at,
+            'timeInTrade': time_in_trade or "-",
+            'openedFormatted': opened_formatted or "-",
         })
 
     return results
