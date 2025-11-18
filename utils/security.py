@@ -48,6 +48,12 @@ def add_security_headers(app):
             'payment=()'
         )
 
+        # Prevent caching for dynamic pages (especially wallet dashboards)
+        if request.path.startswith('/wallet/') or request.path == '/':
+            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            resp.headers['Pragma'] = 'no-cache'
+            resp.headers['Expires'] = '0'
+
         return resp
 
 

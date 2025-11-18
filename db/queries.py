@@ -1062,6 +1062,9 @@ def get_win_rates_by_wallet(session: Session, start: datetime, end: datetime, ze
 def get_strategy_performance(session: Session, start: datetime, end: datetime, wallet_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get performance metrics per strategy.
+    
+    Uses AggregatedTrade table where PNL per trade per strategy is already stored.
+    Uses SQL aggregation for efficiency.
 
     Args:
         session: Database session
@@ -1073,105 +1076,174 @@ def get_strategy_performance(session: Session, start: datetime, end: datetime, w
         List of dicts with strategy_id, strategy_name, total_pnl, trade_count, win_rate, avg_pnl
     """
     from db.models_strategies import Strategy
+    from db.models import AggregatedTrade
+    from sqlalchemy import func, case
+    from sqlalchemy.exc import OperationalError
 
-    query = (
-        session.query(ClosedTrade.strategy_id, ClosedTrade.closed_pnl, Strategy.name)
-        .outerjoin(Strategy, ClosedTrade.strategy_id == Strategy.id)
-        .filter(ClosedTrade.timestamp >= start)
-        .filter(ClosedTrade.timestamp < end)
-    )
+    try:
+        # Use SQL aggregation - reads from AggregatedTrade (same as wallet dashboards)
+        query = (
+            session.query(
+                AggregatedTrade.strategy_id,
+                Strategy.name,
+                func.sum(AggregatedTrade.total_pnl).label('total_pnl'),
+                func.count(AggregatedTrade.id).label('trade_count'),
+                func.sum(case((AggregatedTrade.total_pnl > 0, 1), else_=0)).label('wins')
+            )
+            .outerjoin(Strategy, AggregatedTrade.strategy_id == Strategy.id)
+            .filter(AggregatedTrade.timestamp >= start)
+            .filter(AggregatedTrade.timestamp < end)
+            .group_by(AggregatedTrade.strategy_id, Strategy.name)
+        )
 
-    if wallet_id:
-        query = query.filter(ClosedTrade.wallet_id == wallet_id)
+        if wallet_id:
+            query = query.filter(AggregatedTrade.wallet_id == wallet_id)
 
-    trades = query.all()
+        rows = query.all()
+        
+        results = []
+        for strategy_id, strategy_name, total_pnl, trade_count, wins in rows:
+            win_rate = (wins / trade_count * 100.0) if trade_count > 0 else 0.0
+            avg_pnl = total_pnl / trade_count if trade_count > 0 else 0.0
 
-    strategy_stats: Dict[Optional[int], Dict[str, Any]] = {}
-    for strategy_id, pnl, strategy_name in trades:
-        if strategy_id not in strategy_stats:
-            strategy_stats[strategy_id] = {
+            results.append({
                 'strategy_id': strategy_id,
                 'strategy_name': strategy_name or 'Unassigned',
-                'total_pnl': 0.0,
-                'trade_count': 0,
-                'wins': 0,
-                'pnls': []
-            }
+                'total_pnl': round(float(total_pnl or 0), 2),
+                'trade_count': int(trade_count or 0),
+                'win_rate': round(win_rate, 2),
+                'avg_pnl': round(avg_pnl, 2),
+            })
 
-        strategy_stats[strategy_id]['total_pnl'] += float(pnl or 0)
-        strategy_stats[strategy_id]['trade_count'] += 1
-        strategy_stats[strategy_id]['pnls'].append(float(pnl or 0))
-        if pnl > 0:
-            strategy_stats[strategy_id]['wins'] += 1
+        # Sort by total PnL descending
+        results.sort(key=lambda x: x['total_pnl'], reverse=True)
+        return results
+        
+    except OperationalError:
+        # Fallback to ClosedTrade if AggregatedTrade doesn't exist
+        from db.models import ClosedTrade
+        query = (
+            session.query(
+                ClosedTrade.strategy_id,
+                Strategy.name,
+                func.sum(ClosedTrade.closed_pnl).label('total_pnl'),
+                func.count(ClosedTrade.id).label('trade_count'),
+                func.sum(case((ClosedTrade.closed_pnl > 0, 1), else_=0)).label('wins')
+            )
+            .outerjoin(Strategy, ClosedTrade.strategy_id == Strategy.id)
+            .filter(ClosedTrade.timestamp >= start)
+            .filter(ClosedTrade.timestamp < end)
+            .group_by(ClosedTrade.strategy_id, Strategy.name)
+        )
 
-    results = []
-    for sid, stats in strategy_stats.items():
-        trade_count = stats['trade_count']
-        wins = stats['wins']
-        win_rate = (wins / trade_count * 100.0) if trade_count > 0 else 0.0
-        avg_pnl = stats['total_pnl'] / trade_count if trade_count > 0 else 0.0
+        if wallet_id:
+            query = query.filter(ClosedTrade.wallet_id == wallet_id)
 
-        results.append({
-            'strategy_id': sid,
-            'strategy_name': stats['strategy_name'],
-            'total_pnl': round(stats['total_pnl'], 2),
-            'trade_count': trade_count,
-            'win_rate': round(win_rate, 2),
-            'avg_pnl': round(avg_pnl, 2),
-        })
+        rows = query.all()
+        
+        results = []
+        for strategy_id, strategy_name, total_pnl, trade_count, wins in rows:
+            win_rate = (wins / trade_count * 100.0) if trade_count > 0 else 0.0
+            avg_pnl = total_pnl / trade_count if trade_count > 0 else 0.0
 
-    # Sort by total PnL descending
-    results.sort(key=lambda x: x['total_pnl'], reverse=True)
-    return results
+            results.append({
+                'strategy_id': strategy_id,
+                'strategy_name': strategy_name or 'Unassigned',
+                'total_pnl': round(float(total_pnl or 0), 2),
+                'trade_count': int(trade_count or 0),
+                'win_rate': round(win_rate, 2),
+                'avg_pnl': round(avg_pnl, 2),
+            })
+
+        results.sort(key=lambda x: x['total_pnl'], reverse=True)
+        return results
 
 
 def get_symbol_performance(session: Session, start: datetime, end: datetime, wallet_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get performance metrics per symbol.
+    
+    Uses AggregatedTrade table where PNL per trade per symbol is already stored.
+    Uses SQL aggregation for efficiency.
 
     Returns:
         List of dicts with symbol, total_pnl, trade_count, win_rate, avg_pnl
     """
-    query = session.query(ClosedTrade.symbol, ClosedTrade.closed_pnl)
+    from db.models import AggregatedTrade
+    from sqlalchemy import func, case
+    from sqlalchemy.exc import OperationalError
 
-    if wallet_id:
-        query = query.filter(ClosedTrade.wallet_id == wallet_id)
+    try:
+        # Use SQL aggregation - reads from AggregatedTrade (same as wallet dashboards)
+        query = (
+            session.query(
+                AggregatedTrade.symbol,
+                func.sum(AggregatedTrade.total_pnl).label('total_pnl'),
+                func.count(AggregatedTrade.id).label('trade_count'),
+                func.sum(case((AggregatedTrade.total_pnl > 0, 1), else_=0)).label('wins')
+            )
+            .filter(AggregatedTrade.timestamp >= start)
+            .filter(AggregatedTrade.timestamp < end)
+            .group_by(AggregatedTrade.symbol)
+        )
 
-    trades = query.filter(ClosedTrade.timestamp >= start).filter(ClosedTrade.timestamp < end).all()
+        if wallet_id:
+            query = query.filter(AggregatedTrade.wallet_id == wallet_id)
 
-    symbol_stats: Dict[str, Dict[str, Any]] = {}
-    for symbol, pnl in trades:
-        if symbol not in symbol_stats:
-            symbol_stats[symbol] = {
+        rows = query.all()
+        
+        results = []
+        for symbol, total_pnl, trade_count, wins in rows:
+            win_rate = (wins / trade_count * 100.0) if trade_count > 0 else 0.0
+            avg_pnl = total_pnl / trade_count if trade_count > 0 else 0.0
+
+            results.append({
                 'symbol': symbol,
-                'total_pnl': 0.0,
-                'trade_count': 0,
-                'wins': 0,
-            }
+                'total_pnl': round(float(total_pnl or 0), 2),
+                'trade_count': int(trade_count or 0),
+                'win_rate': round(win_rate, 2),
+                'avg_pnl': round(avg_pnl, 2),
+            })
 
-        symbol_stats[symbol]['total_pnl'] += float(pnl or 0)
-        symbol_stats[symbol]['trade_count'] += 1
-        if pnl > 0:
-            symbol_stats[symbol]['wins'] += 1
+        # Sort by total PnL descending
+        results.sort(key=lambda x: x['total_pnl'], reverse=True)
+        return results
+        
+    except OperationalError:
+        # Fallback to ClosedTrade if AggregatedTrade doesn't exist
+        from db.models import ClosedTrade
+        query = (
+            session.query(
+                ClosedTrade.symbol,
+                func.sum(ClosedTrade.closed_pnl).label('total_pnl'),
+                func.count(ClosedTrade.id).label('trade_count'),
+                func.sum(case((ClosedTrade.closed_pnl > 0, 1), else_=0)).label('wins')
+            )
+            .filter(ClosedTrade.timestamp >= start)
+            .filter(ClosedTrade.timestamp < end)
+            .group_by(ClosedTrade.symbol)
+        )
 
-    results = []
-    for symbol, stats in symbol_stats.items():
-        trade_count = stats['trade_count']
-        wins = stats['wins']
-        win_rate = (wins / trade_count * 100.0) if trade_count > 0 else 0.0
-        avg_pnl = stats['total_pnl'] / trade_count if trade_count > 0 else 0.0
+        if wallet_id:
+            query = query.filter(ClosedTrade.wallet_id == wallet_id)
 
-        results.append({
-            'symbol': symbol,
-            'total_pnl': round(stats['total_pnl'], 2),
-            'trade_count': trade_count,
-            'win_rate': round(win_rate, 2),
-            'avg_pnl': round(avg_pnl, 2),
-        })
+        rows = query.all()
+        
+        results = []
+        for symbol, total_pnl, trade_count, wins in rows:
+            win_rate = (wins / trade_count * 100.0) if trade_count > 0 else 0.0
+            avg_pnl = total_pnl / trade_count if trade_count > 0 else 0.0
 
-    # Sort by total PnL descending
-    results.sort(key=lambda x: x['total_pnl'], reverse=True)
-    return results
+            results.append({
+                'symbol': symbol,
+                'total_pnl': round(float(total_pnl or 0), 2),
+                'trade_count': int(trade_count or 0),
+                'win_rate': round(win_rate, 2),
+                'avg_pnl': round(avg_pnl, 2),
+            })
+
+        results.sort(key=lambda x: x['total_pnl'], reverse=True)
+        return results
 
 
 def get_active_positions_count(session: Session, wallet_id: Optional[int] = None) -> Dict[int, int]:
@@ -1240,6 +1312,14 @@ def get_recent_trades(session: Session, limit: int = 10, wallet_id: Optional[int
     except Exception:
         has_leverage_column = False
 
+    def _normalize_side(raw: Optional[str]) -> str:
+        s = str(raw or '').lower()
+        if s in ('b', 'bid', 'buy', 'long'):
+            return 'buy'
+        if s in ('a', 'ask', 'sell', 'short'):
+            return 'sell'
+        return s or 'buy'
+
     try:
         from db.models import AggregatedTrade
         query = (
@@ -1289,14 +1369,6 @@ def get_recent_trades(session: Session, limit: int = 10, wallet_id: Optional[int
                 trades.append((trade, strategy_name, wallet_name))
         else:
             raise
-
-    def _normalize_side(raw: Optional[str]) -> str:
-        s = str(raw or '').lower()
-        if s in ('b', 'bid', 'buy', 'long'):
-            return 'buy'
-        if s in ('a', 'ask', 'sell', 'short'):
-            return 'sell'
-        return s or 'buy'
 
     # Convert aggregated trades to result dicts
     results = []
@@ -1410,6 +1482,25 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
             except Exception:
                 pass
         
+        # If leverage is None in latest snapshot, try to get it from most recent snapshot with valid leverage
+        leverage = float(pos.leverage) if pos.leverage else None
+        equity_used = float(pos.equity_used) if pos.equity_used is not None else None
+        
+        if leverage is None and pos.wallet_id and pos.symbol:
+            # Find most recent snapshot with valid leverage for this position
+            # Use the PositionSnapshot model already imported at function level
+            recent_with_leverage = session.query(PositionSnapshot).filter(
+                PositionSnapshot.wallet_id == pos.wallet_id,
+                PositionSnapshot.symbol == pos.symbol,
+                PositionSnapshot.size > 0,
+                PositionSnapshot.leverage.isnot(None),
+                PositionSnapshot.leverage <= 100.0  # Exclude invalid high values
+            ).order_by(desc(PositionSnapshot.timestamp)).first()
+            
+            if recent_with_leverage:
+                leverage = float(recent_with_leverage.leverage)
+                equity_used = float(recent_with_leverage.equity_used) if recent_with_leverage.equity_used else None
+        
         results.append({
             'wallet_id': pos.wallet_id,
             'wallet_name': wallet_name,
@@ -1420,8 +1511,8 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
             'current_price': float(pos.current_price or 0) if pos.current_price else None,
             'unrealized_pnl': float(pos.unrealized_pnl or 0),
             'position_size_usd': float(pos.position_size_usd or 0),
-            'leverage': float(pos.leverage) if pos.leverage else None,
-            'equity_used': float(pos.equity_used) if pos.equity_used is not None else None,
+            'leverage': leverage,
+            'equity_used': equity_used,
             'strategy_name': strategy_name,
             'timestamp': pos.timestamp,
             'opened_at': pos.opened_at,

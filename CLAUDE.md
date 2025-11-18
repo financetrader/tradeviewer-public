@@ -318,7 +318,7 @@ Hit a Flask/SQLAlchemy/SQLite issue? Add it to this file that session.
 - **Portfolio equity aggregation**: DO NOT filter wallets based on staleness (e.g., no update in 1 hour). This causes artificial dips in equity charts. Wallets are the source of truth - aggregate ALL connected wallets' latest snapshots, no matter the age. Show staleness warnings in UI instead (see `db/queries.py:get_equity_history()`).
 - **Form array submission in Flask**: Use `request.form.getlist('fieldname')` to get HTML form arrays (when `<input name="symbol">` appears multiple times). Check for getlist() first, then fall back to get() for backwards compatibility with single-value forms. In templates, form fields with `name="symbols"` submit as array, not single string.
 - **Table filtering with data attributes**: Use `data-*` attributes on table rows for client-side filtering/sorting. Get filter/sort values from data attributes, not from displayed cell text. This allows filtering by different values than what's displayed (e.g., numeric trade count instead of text). Always use `.toLowerCase()` for case-insensitive string comparisons. See `templates/admin_strategies.html` for example implementation.
-- **Leverage calculation**: Calculated using margin delta tracking at position OPEN time (stored in position_snapshots). When trades close, leverage is looked up from position_snapshots. Both Apex Omni and Hyperliquid use margin delta method for new positions. Old trades (Aug-Nov 7) have no leverage (logger not running then). See `docs/leverage/LEVERAGE_CALCULATION.md` for complete implementation, exchange-specific algorithms, and verification steps.
+- **Leverage calculation**: Calculated using margin delta tracking at position OPEN time (stored in position_snapshots). **CRITICAL**: Leverage is calculated ONCE when position first opens, then preserved for all future snapshots. Check the FIRST snapshot (not latest) - if it has leverage, use it for ALL future snapshots. Only calculate if first snapshot doesn't have it. Both Apex Omni and Hyperliquid use margin delta method for new positions. Old trades (Aug-Nov 7) have no leverage (logger not running then). See `docs/leverage/LEVERAGE_CALCULATION.md` for complete implementation, exchange-specific algorithms, and verification steps.
 - **Aggregated trades**: Exchange APIs return individual fills. System groups fills by (wallet_id, timestamp, symbol) into logical trades. Uses `aggregated_trades` table. UI shows aggregated view; raw fills still in `closed_trades`. 148 fills grouped into 29 logical trades.
 - **Data Refresh Architecture**: Dashboard routes are read-only from database (no API calls on page load). Refresh happens via AJAX endpoints (`/api/wallet/<id>/refresh`). Background scheduler uses `services/wallet_refresh.py::refresh_wallet_data()`. Always test refresh functionality separately from page load. Refresh errors shown as popup with error log.
 
@@ -510,15 +510,48 @@ CSRF tokens are required for all POST requests.
 
 ## Quick Reference: Common Commands
 
-**Start app:**
+**Start app (WORKING method - verified):**
 ```bash
-python app.py
+# Step 1: Kill all existing processes
+pkill -9 -f "python.*app.py"
+sleep 3
+
+# Step 2: Verify port is free
+netstat -tlnp 2>/dev/null | grep :5000 || ss -tlnp 2>/dev/null | grep :5000 || echo "Port 5000 is free"
+
+# Step 3: Start app in background (Flask needs time to initialize)
+cd /root/app-tradeviewer
+source venv/bin/activate
+python app.py 2>&1 &
+sleep 15  # Flask needs ~15 seconds to fully start
+
+# Step 4: Verify it's running
+curl -s http://localhost:5000/health
+# Should return: {"status": "healthy", "timestamp": "..."}
+
+# Step 5: Check process is running
+ps aux | grep -E "python.*app.py" | grep -v grep
+```
+
+**If app won't start:**
+```bash
+# Check for import errors first
+source venv/bin/activate
+python3 -c "import app; print('Import OK')" 2>&1
+
+# Check syntax
+python3 -m py_compile app.py
+
+# Start and watch output for errors
+python app.py 2>&1 | head -50
 ```
 
 **Check if running:**
 ```bash
 ps aux | grep app.py
 curl http://localhost:5000/health
+# Or check logs
+tail -20 logs/app_startup.log
 ```
 
 **View logs:**

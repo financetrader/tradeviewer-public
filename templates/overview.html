@@ -318,6 +318,7 @@
                         <th class="text-right">Size</th>
                         <th class="text-right">Price</th>
                         <th class="text-right">PnL</th>
+                        <th class="text-right">Leverage</th>
                         <th>Strategy</th>
                     </tr>
                 </thead>
@@ -351,6 +352,11 @@
                                 <span class="pill pill-neg">${{ "%.2f"|format(trade.closedPnl) }}</span>
                             {% else %}
                                 <span class="pill pill-neutral">$0.00</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if trade.leverage is not none and trade.leverage %}
+                                {{ "%.1f"|format(trade.leverage) }}x
                             {% endif %}
                         </td>
                         <td style="font-size: 0.85rem; color: #8b92b0;">

@@ -140,6 +140,149 @@ The application uses a database-centric, asynchronous refresh architecture. Dash
 - When offline: no gaps; realized PnL only changes when trades close, so charts render a flat horizontal line until the next closed trade
 - Recovery: when the server restarts, the next refresh/30‑minute cycle re-syncs all historical closed trades from the exchange
 
+## Database Schema & Table Usage
+
+**IMPORTANT**: Understanding which table to use prevents bugs and ensures data consistency.
+
+### Trade Tables: `closed_trades` vs `aggregated_trades`
+
+The application uses two tables for storing trade data:
+
+#### `closed_trades` Table
+- **Purpose**: Raw individual fills from exchange APIs
+- **Structure**: One row per fill/execution
+- **Use Cases**: 
+  - Internal processing and aggregation
+  - Fallback when `aggregated_trades` doesn't exist
+  - Detailed fill-level analysis
+- **Key Fields**:
+  - `closed_pnl` (Float): PNL for this individual fill
+  - `strategy_id` (Integer): Strategy assignment at time of fill
+  - `wallet_id` (Integer): Wallet that executed the trade
+  - `reduce_only` (Boolean): True if closing position, False if opening
+
+#### `aggregated_trades` Table ⭐ **PRIMARY TABLE FOR DISPLAY**
+- **Purpose**: Complete trades (opening + closing leg combined)
+- **Structure**: One row per complete trade round-trip
+- **Use Cases**: 
+  - **Wallet dashboards** (`/wallet/<id>`) - Closed P&L tab
+  - **Strategy performance** calculations
+  - **Recent trades** display
+  - **Portfolio overview** - Recent activity
+- **Key Fields**:
+  - `total_pnl` (Float): **Sum of PNL from all fills** that make up this trade
+  - `strategy_id` (Integer): Strategy assignment (copied from closing leg)
+  - `wallet_id` (Integer): Wallet that executed the trade
+  - `avg_entry_price` (Float): Weighted average entry price
+  - `avg_exit_price` (Float): Weighted average exit price
+  - `leverage` (Float): Leverage used for this trade
+  - `equity_used` (Float): Equity allocated to this trade
+
+**Why Two Tables?**
+- Exchange APIs return individual fills (e.g., partial fills, multiple executions)
+- `closed_trades` stores raw fills for accuracy
+- `aggregated_trades` groups fills into logical trades for cleaner UI display
+- Each aggregated trade represents one complete position open→close cycle
+
+### Strategy Performance Calculations
+
+**CRITICAL**: Always use `aggregated_trades` table for strategy performance.
+
+**Function**: `get_strategy_performance()`
+- **Table**: `aggregated_trades` (with fallback to `closed_trades` if table doesn't exist)
+- **Fields Used**:
+  - `strategy_id`: Group trades by strategy
+  - `total_pnl`: Sum per strategy (already aggregated per trade)
+  - `timestamp`: Filter by date range
+- **Calculations**:
+  - Total PnL: `SUM(total_pnl)` grouped by `strategy_id`
+  - Trade Count: `COUNT(*)` grouped by `strategy_id`
+  - Win Rate: `SUM(CASE WHEN total_pnl > 0 THEN 1 ELSE 0 END) / COUNT(*) * 100`
+  - Avg PnL: `SUM(total_pnl) / COUNT(*)`
+
+**Why `aggregated_trades`?**
+- Each row = one complete trade (not individual fills)
+- `total_pnl` already contains the sum of all fills
+- Matches what wallet dashboards display
+- Avoids double-counting when multiple fills make up one trade
+
+### Symbol Performance Calculations
+
+**CRITICAL**: Always use `aggregated_trades` table for symbol performance.
+
+**Function**: `get_symbol_performance()`
+- **Table**: `aggregated_trades` (with fallback to `closed_trades` if table doesn't exist)
+- **Fields Used**:
+  - `symbol`: Group trades by symbol
+  - `total_pnl`: Sum per symbol (already aggregated per trade)
+  - `timestamp`: Filter by date range
+- **Calculations**:
+  - Total PnL: `SUM(total_pnl)` grouped by `symbol`
+  - Trade Count: `COUNT(*)` grouped by `symbol`
+  - Win Rate: `SUM(CASE WHEN total_pnl > 0 THEN 1 ELSE 0 END) / COUNT(*) * 100`
+  - Avg PnL: `SUM(total_pnl) / COUNT(*)`
+
+**Why `aggregated_trades`?**
+- Each row = one complete trade (not individual fills)
+- `total_pnl` already contains the sum of all fills
+- Matches what wallet dashboards display
+- Avoids double-counting when multiple fills make up one trade
+- Same pattern as strategy performance for consistency
+
+### Other Key Tables
+
+#### `equity_snapshots`
+- **Purpose**: Historical equity and balance data
+- **Frequency**: Every 30 minutes
+- **Key Fields**: `total_equity`, `unrealized_pnl`, `available_balance`, `realized_pnl`, `initial_margin`
+
+#### `position_snapshots`
+- **Purpose**: Historical open position data
+- **Frequency**: Every 30 minutes (when positions are open)
+- **Key Fields**: `size`, `entry_price`, `current_price`, `unrealized_pnl`, `leverage`, `equity_used`, `strategy_name`, `calculation_method`, `opened_at`
+- **Leverage Storage**: Leverage is calculated ONCE when position first opens and stored in `leverage` field. The system checks the FIRST snapshot - if it has valid leverage, that value is used for ALL future snapshots (not recalculated) to ensure consistency.
+
+#### `strategies` & `strategy_assignments`
+- **Purpose**: Strategy catalog and wallet+symbol assignments
+- **Key Fields**: `name`, `description`, `start_at`, `end_at`, `wallet_id`, `symbol`
+
+### Query Functions Reference
+
+| Function | Table Used | Purpose |
+|----------|-----------|---------|
+| `get_aggregated_closed_trades()` | `aggregated_trades` | Wallet dashboard Closed P&L tab |
+| `get_recent_trades()` | `aggregated_trades` | Portfolio overview Recent Trades |
+| `get_strategy_performance()` | `aggregated_trades` | Strategy Performance card |
+| `get_symbol_performance()` | `aggregated_trades` | Top Symbols by PnL card |
+| `get_closed_trades()` | `closed_trades` | Fallback, detailed fill analysis |
+| `get_realized_pnl_by_wallet()` | `closed_trades` | Wallet-level PnL sums (uses fills) |
+
+**Note**: There's a known inconsistency where `get_realized_pnl_by_wallet()` uses `closed_trades` (individual fills) while display uses `aggregated_trades` (complete trades). This may cause slight discrepancies in totals.
+
+### Leverage Calculation & Storage
+
+**How Leverage is Calculated:**
+- **Hyperliquid**: Uses margin delta method - tracks `totalMarginUsed` changes when position opens
+- **Apex**: Uses margin delta method - tracks `initialMargin` changes when position opens
+- Leverage = `position_size_usd / equity_used` where `equity_used` is the margin delta
+
+**When Leverage is Calculated:**
+- **CRITICAL**: Leverage is calculated ONCE when position first opens, then preserved for all future snapshots
+- Checks the FIRST snapshot (when position was first opened) - if it has leverage, uses it for ALL future snapshots
+- Only calculates if the FIRST snapshot doesn't have leverage (or has invalid leverage >100x)
+- **Preserved if valid**: If first snapshot has valid leverage, it's returned from database (not recalculated) for all subsequent refreshes
+
+**Storage:**
+- Stored in `position_snapshots.leverage` field
+- Also stored in `closed_trades.leverage` and `aggregated_trades.leverage` when trades close
+- `calculation_method` field indicates how leverage was calculated (`margin_delta`, `margin_rate`, or `unknown`)
+
+**Display:**
+- Wallet dashboard reads leverage from `position_snapshots` entry
+- If latest snapshot has `leverage=None`, the system looks for the most recent snapshot with valid leverage (≤100x) and uses that
+- If leverage is `None` in database, displays as "-" (empty)
+- Leverage is calculated once when position first opens (stored in first snapshot), then preserved for all future snapshots
+
 ### Background Logger
 
 The background logger runs automatically when you start the application. It:

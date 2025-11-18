@@ -101,6 +101,28 @@ def log_positions_for_all_wallets():
                             # Get raw API position data (full position object from clearinghouse state)
                             raw_position_data = raw_positions_dict.get(asset, {})
 
+                            # Extract current price (mark price) from raw position data
+                            current_price = None
+                            if raw_position_data:
+                                # Try to get mark price directly (Hyperliquid may provide markPx or similar)
+                                mark_px = raw_position_data.get('markPx') or raw_position_data.get('markPrice') or raw_position_data.get('mark_price')
+                                if mark_px:
+                                    try:
+                                        current_price = float(mark_px)
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                # Fallback: calculate from positionValue and size
+                                if current_price is None and abs(size) > 0:
+                                    position_value = raw_position_data.get('positionValue')
+                                    if position_value:
+                                        try:
+                                            position_value_float = float(position_value)
+                                            if position_value_float > 0:
+                                                current_price = position_value_float / abs(size)
+                                        except (ValueError, TypeError):
+                                            pass
+
                             # Calculate leverage for Hyperliquid positions using margin delta
                             leverage = None
                             equity_used = None
@@ -118,7 +140,7 @@ def log_positions_for_all_wallets():
                                 'side': p.get('side', ''),
                                 'size': abs(size),
                                 'entryPrice': entry_price,
-                                'currentPrice': None,
+                                'currentPrice': current_price,
                                 'leverage': leverage,
                                 'unrealizedPnl': float(p.get('unrealized_pnl') or 0),
                                 'fundingFee': None,
