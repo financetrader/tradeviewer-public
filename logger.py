@@ -1,6 +1,9 @@
 import os
 import time
+import logging
 from datetime import datetime
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 
 # Database imports
@@ -20,6 +23,39 @@ except Exception:
     NETWORKID_OMNI_MAIN_ARB = None
 
 load_dotenv()
+
+
+def setup_refresh_logger():
+    """Set up file logger for refresh operations."""
+    logger = logging.getLogger('refresh_logger')
+    if logger.handlers:
+        return logger
+    
+    logger.setLevel(logging.INFO)
+    log_path = Path('logs/refresh_operations.log')
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    handler = RotatingFileHandler(
+        log_path, 
+        maxBytes=10_000_000,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    # Also log to console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+refresh_logger = setup_refresh_logger()
 
 
 def log_positions_for_all_wallets():
@@ -281,6 +317,8 @@ def log_equity_and_pnl():
 
 def run_scheduler():
     """Run wallet refresh at :00 and :30 past each hour"""
+    refresh_logger.info("Starting wallet refresh scheduler (synced to :00 and :30 past each hour)")
+    refresh_logger.info("Logging to: Database (data/wallet.db)")
     print("Starting wallet refresh scheduler (synced to :00 and :30 past each hour)...")
     print(f"Logging to: Database (data/wallet.db)")
     
@@ -300,55 +338,111 @@ def run_scheduler():
     wait_seconds = wait_minutes * 60 - current_second
     
     if wait_seconds > 0:
+        refresh_logger.info(f"Waiting {wait_minutes} minutes until :{target_minute:02d} to start refreshing...")
         print(f"Waiting {wait_minutes} minutes until :{target_minute:02d} to start refreshing...")
         time.sleep(wait_seconds)
     
     # Refresh immediately at the synchronized time
-    refresh_all_wallets()
-
+    try:
+        refresh_all_wallets()
+    except Exception as e:
+        refresh_logger.critical(f"Scheduler crashed during initial refresh: {e}", exc_info=True)
+        # Continue anyway - don't let one failure kill the scheduler
+    
     # Then refresh every 30 minutes
     interval = 30 * 60  # 30 minutes in seconds
-
+    
+    refresh_logger.info(f"Entering refresh loop (every {interval/60} minutes)")
+    
     while True:
-        time.sleep(interval)
-        refresh_all_wallets()
+        try:
+            time.sleep(interval)
+            refresh_logger.info("=== Scheduled refresh triggered ===")
+            refresh_all_wallets()
+        except KeyboardInterrupt:
+            refresh_logger.info("Scheduler interrupted by user")
+            raise
+        except Exception as e:
+            # CRITICAL: Log but don't let scheduler die
+            refresh_logger.critical(
+                f"Scheduler loop error (continuing): {e}",
+                exc_info=True
+            )
+            print(f"CRITICAL: Scheduler error (continuing): {e}")
+            # Continue loop - don't let one failure kill the scheduler
+            time.sleep(60)  # Wait 1 minute before retrying
 
 
 def refresh_all_wallets():
     """Refresh data for all connected wallets."""
+    timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    
     try:
         from services.wallet_refresh import refresh_wallet_data
         
-        timestamp_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         wallets = WalletService.get_all_connected_wallets()
-        
+        refresh_logger.info(f"=== Starting refresh cycle for {len(wallets)} wallet(s) ===")
         print(f"\n[{timestamp_str}] Starting refresh for {len(wallets)} wallet(s)...")
         
         success_count = 0
         error_count = 0
+        failed_wallets = []
         
         for wallet in wallets:
             wallet_id = wallet['id']
             wallet_name = wallet['name']
+            provider = wallet.get('provider', 'unknown')
             
             try:
+                refresh_logger.info(f"Refreshing wallet {wallet_id} ({wallet_name}) [{provider}]")
+                
                 success, error_msg, refresh_time = refresh_wallet_data(wallet_id)
                 
                 if success:
                     success_count += 1
+                    refresh_logger.info(f"✓ Successfully refreshed wallet {wallet_id} ({wallet_name}) at {refresh_time}")
                     print(f"[{timestamp_str}] ✓ {wallet_name}")
                 else:
                     error_count += 1
+                    failed_wallets.append({
+                        'wallet_id': wallet_id,
+                        'name': wallet_name,
+                        'error': error_msg
+                    })
+                    refresh_logger.error(
+                        f"✗ Failed to refresh wallet {wallet_id} ({wallet_name}): {error_msg}",
+                        exc_info=False
+                    )
                     print(f"[{timestamp_str}] ✗ {wallet_name}: {error_msg}")
                     
             except Exception as e:
                 error_count += 1
+                error_msg = f"Exception refreshing wallet {wallet_id}: {str(e)}"
+                failed_wallets.append({
+                    'wallet_id': wallet_id,
+                    'name': wallet_name,
+                    'error': error_msg,
+                    'error_type': type(e).__name__
+                })
+                refresh_logger.error(
+                    f"✗ Exception refreshing wallet {wallet_id} ({wallet_name}): {error_msg}",
+                    exc_info=True  # Include stack trace
+                )
                 print(f"[{timestamp_str}] ✗ {wallet_name}: {str(e)}")
         
-        print(f"[{timestamp_str}] Refresh complete: {success_count} succeeded, {error_count} failed\n")
+        summary = f"Refresh complete: {success_count} succeeded, {error_count} failed"
+        refresh_logger.info(f"=== {summary} ===")
+        
+        if failed_wallets:
+            refresh_logger.warning(f"Failed wallets: {failed_wallets}")
+        
+        print(f"[{timestamp_str}] {summary}\n")
         
     except Exception as e:
+        error_msg = f"Critical error in refresh_all_wallets: {str(e)}"
+        refresh_logger.critical(error_msg, exc_info=True)
         print(f"Error in refresh_all_wallets: {e}")
+        raise  # Re-raise to be caught by scheduler
 
 
 if __name__ == "__main__":

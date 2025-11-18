@@ -16,6 +16,7 @@ from services.data_service import get_enriched_account_data
 from services.apex_client import get_all_fills
 from services.sync_service import sync_closed_trades_from_fills
 from services.aggregation_service import sync_aggregated_trades
+from services.exchange_logging import get_exchange_logger, jlog
 from utils.data_utils import normalize_symbol
 from utils.validation import sanitize_string, sanitize_float
 from sqlalchemy import func
@@ -38,34 +39,103 @@ def refresh_wallet_data(wallet_id: int) -> Tuple[bool, Optional[str], Optional[d
     Returns:
         Tuple of (success: bool, error_message: Optional[str], last_refresh_time: Optional[datetime])
     """
+    exchange_logger = get_exchange_logger()
+    refresh_time = datetime.utcnow()
+    
     try:
-        refresh_time = datetime.utcnow()
+        # Log API call start
+        jlog(exchange_logger, {
+            'operation': 'refresh_wallet_start',
+            'wallet_id': wallet_id,
+            'timestamp': refresh_time.isoformat()
+        })
         
         # Get wallet configuration
         with get_session() as session:
             wallet = session.query(WalletConfig).filter(WalletConfig.id == wallet_id).first()
             if not wallet:
+                jlog(exchange_logger, {
+                    'operation': 'refresh_wallet_complete',
+                    'wallet_id': wallet_id,
+                    'success': False,
+                    'error': f'Wallet {wallet_id} not found'
+                })
                 return (False, f"Wallet {wallet_id} not found", None)
             
             if wallet.status != 'connected':
+                jlog(exchange_logger, {
+                    'operation': 'refresh_wallet_complete',
+                    'wallet_id': wallet_id,
+                    'success': False,
+                    'error': f"Wallet '{wallet.name}' is not connected"
+                })
                 return (False, f"Wallet '{wallet.name}' is not connected", None)
             
             provider = wallet.provider
             wallet_name = wallet.name
         
-        # Get API client for this wallet
+        # Get API client for this wallet (enable logging)
         try:
-            client = WalletService.get_wallet_client_by_id(wallet_id, with_logging=False)
+            client = WalletService.get_wallet_client_by_id(wallet_id, with_logging=True)
+            jlog(exchange_logger, {
+                'operation': 'client_created',
+                'wallet_id': wallet_id,
+                'provider': provider,
+                'success': True
+            })
         except Exception as e:
+            jlog(exchange_logger, {
+                'operation': 'client_created',
+                'wallet_id': wallet_id,
+                'provider': provider,
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            })
             return (False, f"Failed to create API client: {str(e)}", None)
         
         # Fetch data based on provider
         if provider == 'hyperliquid':
+            jlog(exchange_logger, {
+                'operation': 'refresh_hyperliquid_start',
+                'wallet_id': wallet_id
+            })
             success, error_msg = _refresh_hyperliquid_wallet(wallet_id, client, refresh_time)
+            jlog(exchange_logger, {
+                'operation': 'refresh_hyperliquid_complete',
+                'wallet_id': wallet_id,
+                'success': success,
+                'error': error_msg if not success else None
+            })
         elif provider == 'apex_omni':
+            jlog(exchange_logger, {
+                'operation': 'refresh_apex_start',
+                'wallet_id': wallet_id
+            })
             success, error_msg = _refresh_apex_wallet(wallet_id, client, refresh_time)
+            jlog(exchange_logger, {
+                'operation': 'refresh_apex_complete',
+                'wallet_id': wallet_id,
+                'success': success,
+                'error': error_msg if not success else None
+            })
         else:
+            jlog(exchange_logger, {
+                'operation': 'refresh_wallet_complete',
+                'wallet_id': wallet_id,
+                'success': False,
+                'error': f"Provider '{provider}' not supported for refresh"
+            })
             return (False, f"Provider '{provider}' not supported for refresh", None)
+        
+        # Log completion
+        duration_seconds = (datetime.utcnow() - refresh_time).total_seconds()
+        jlog(exchange_logger, {
+            'operation': 'refresh_wallet_complete',
+            'wallet_id': wallet_id,
+            'success': success,
+            'duration_seconds': round(duration_seconds, 2)
+        })
         
         if not success:
             return (False, error_msg, None)
@@ -75,6 +145,13 @@ def refresh_wallet_data(wallet_id: int) -> Tuple[bool, Optional[str], Optional[d
         
     except Exception as e:
         error_msg = f"Unexpected error refreshing wallet {wallet_id}: {str(e)}"
+        jlog(exchange_logger, {
+            'operation': 'refresh_wallet_complete',
+            'wallet_id': wallet_id,
+            'success': False,
+            'error': error_msg,
+            'error_type': type(e).__name__
+        })
         print(f"Error: {error_msg}")
         return (False, error_msg, None)
 
@@ -187,6 +264,18 @@ def _refresh_hyperliquid_wallet(wallet_id: int, client, refresh_time: datetime) 
                         position_size_usd, current_margin_used, refresh_time
                     )
                 
+                # Extract funding fee from raw API data (cumFunding.sinceOpen = cumulative funding since position opened)
+                funding_fee = None
+                if raw_position_data and raw_position_data.get('cumFunding'):
+                    cum_funding = raw_position_data.get('cumFunding', {})
+                    if isinstance(cum_funding, dict):
+                        since_open = cum_funding.get('sinceOpen')
+                        if since_open is not None:
+                            try:
+                                funding_fee = float(since_open)
+                            except (ValueError, TypeError):
+                                funding_fee = None
+                
                 # Store position snapshot with raw API data
                 position_data = {
                     'wallet_id': wallet_id,
@@ -199,7 +288,7 @@ def _refresh_hyperliquid_wallet(wallet_id: int, client, refresh_time: datetime) 
                     'position_size_usd': position_size_usd,
                     'leverage': leverage,
                     'unrealized_pnl': float(p.get('unrealized_pnl') or 0),
-                    'funding_fee': None,
+                    'funding_fee': funding_fee,
                     'equity_used': equity_used,
                     'calculation_method': calculation_method,
                     'raw_data': raw_position_data,  # Store ALL raw API data

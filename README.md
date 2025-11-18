@@ -66,6 +66,10 @@ Press `Ctrl+C` in the terminal
 - **Historical Charts**: Equity over time, per-symbol P&L tracking
 - **Trade History**: Complete fill history with fees and position sizing
 - **Closed P&L**: Detailed closed trade analysis with entry/exit prices
+- **Position Details**: 
+  - **Funding Fee**: Cumulative funding fee since position opened (from `position_snapshots.funding_fee`)
+  - **Opened Time**: Exact timestamp when position opened (from `position_snapshots.opened_at`)
+  - **Time in Trade**: Duration calculated from `opened_at` to current time
 
 ## Configuration
 
@@ -124,6 +128,10 @@ The application uses a database-centric, asynchronous refresh architecture. Dash
 - Non-blocking UI (refresh happens in background)
 - Always shows data (even if API is slow/down)
 - Manual control (refresh button on each dashboard)
+- **Enhanced Logging**: Detailed file logging for debugging gaps and failures
+  - `logs/refresh_operations.log` - Refresh operations, errors, and scheduler activity
+  - `logs/exchange_traffic.log` - API call details (when logging enabled)
+  - Scheduler resilience: Continues running even if individual refreshes fail
 
 ### Equity Snapshots
 - Frequency: every 30 minutes (background logger) and on-demand via refresh button
@@ -131,6 +139,7 @@ The application uses a database-centric, asynchronous refresh architecture. Dash
 - Source: live API balance data (fetched asynchronously, stored in database)
 - Page load: Dashboard displays cached data from database immediately, then triggers async refresh in background
 - When offline: no points are written → the equity chart shows visible gaps (broken lines) for missing periods
+- **Logging**: All refresh operations logged to `logs/refresh_operations.log` with detailed error tracking and stack traces
 
 ### Closed Trades / Realized PnL
 - Frequency: every 30 minutes (background logger) and on-demand via refresh button
@@ -239,8 +248,27 @@ The application uses two tables for storing trade data:
 #### `position_snapshots`
 - **Purpose**: Historical open position data
 - **Frequency**: Every 30 minutes (when positions are open)
-- **Key Fields**: `size`, `entry_price`, `current_price`, `unrealized_pnl`, `leverage`, `equity_used`, `strategy_name`, `calculation_method`, `opened_at`
+- **Key Fields**: 
+  - `size` (Float): Position size
+  - `entry_price` (Float): Average entry price
+  - `current_price` (Float): Current market price
+  - `unrealized_pnl` (Float): Unrealized profit/loss
+  - `leverage` (Float): Leverage used (calculated once at position open)
+  - `equity_used` (Float): Equity/margin allocated to position
+  - `funding_fee` (Float): **Cumulative funding fee since position opened** (Hyperliquid: `cumFunding.sinceOpen` from API)
+  - `opened_at` (DateTime): **Timestamp when position was first opened** (used for "Opened" column and time-in-trade calculation)
+  - `strategy_name` (String): Strategy assigned to this position
+  - `calculation_method` (String): Method used to calculate leverage (`margin_delta`, `margin_rate`, or `unknown`)
 - **Leverage Storage**: Leverage is calculated ONCE when position first opens and stored in `leverage` field. The system checks the FIRST snapshot - if it has valid leverage, that value is used for ALL future snapshots (not recalculated) to ensure consistency.
+- **Funding Fee Storage**: 
+  - Extracted from exchange API on each refresh (Hyperliquid: `cumFunding.sinceOpen`)
+  - Stored in `funding_fee` field as cumulative total since position opened
+  - Updated on every snapshot refresh (every 30 minutes)
+  - Displayed in wallet dashboard "Positions" table with color coding (red for negative, green for positive)
+- **Opened Time Display**:
+  - `opened_at` field stores the exact timestamp when position was first opened
+  - Displayed in wallet dashboard "Opened" column as `YYYY-MM-DD HH:MM:SS`
+  - Time-in-trade duration calculated from `opened_at` to current time, displayed below timestamp (e.g., "17h 31m")
 
 #### `strategies` & `strategy_assignments`
 - **Purpose**: Strategy catalog and wallet+symbol assignments
@@ -252,6 +280,7 @@ The application uses two tables for storing trade data:
 |----------|-----------|---------|
 | `get_aggregated_closed_trades()` | `aggregated_trades` | Wallet dashboard Closed P&L tab |
 | `get_recent_trades()` | `aggregated_trades` | Portfolio overview Recent Trades |
+| `get_open_positions()` | `position_snapshots` | Wallet dashboard Positions table (includes `funding_fee`, `opened_at`, `timeInTrade`) |
 | `get_strategy_performance()` | `aggregated_trades` | Strategy Performance card |
 | `get_symbol_performance()` | `aggregated_trades` | Top Symbols by PnL card |
 | `get_closed_trades()` | `closed_trades` | Fallback, detailed fill analysis |
