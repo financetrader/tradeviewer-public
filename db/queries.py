@@ -1513,6 +1513,7 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
             'position_size_usd': float(pos.position_size_usd or 0),
             'leverage': leverage,
             'equity_used': equity_used,
+            'funding_fee': float(pos.funding_fee) if pos.funding_fee is not None else None,
             'strategy_name': strategy_name,
             'timestamp': pos.timestamp,
             'opened_at': pos.opened_at,

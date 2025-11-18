@@ -261,13 +261,17 @@
                         <td class="{% if pos.unrealized_pnl >= 0 %}positive{% else %}negative{% endif %}">
                             ${{ "%.2f"|format(pos.unrealized_pnl) }}
                         </td>
-                        <td>-</td>
-                        <td style="font-size: 0.85rem;">{{ pos.opened_formatted }}</td>
+                        <td class="{% if pos.funding_fee and pos.funding_fee < 0 %}negative{% elif pos.funding_fee and pos.funding_fee > 0 %}positive{% endif %}">
+                            {% if pos.funding_fee is not none %}${{ "%.4f"|format(pos.funding_fee) }}{% else %}-{% endif %}
+                        </td>
+                        <td style="font-size: 0.85rem;">
+                            {% if pos.opened_at %}{{ pos.opened_at.strftime("%Y-%m-%d %H:%M:%S") }}{% else %}{{ pos.opened_formatted }}{% endif %}
+                            {% if pos.timeInTrade and pos.timeInTrade != "-" %}
+                                <br><span style="color: #8b92b0; font-size: 0.75rem;">({{ pos.timeInTrade }})</span>
+                            {% endif %}
+                        </td>
                         <td style="font-size: 0.85rem; color: #00d4ff;">
                             {% if pos.strategy_name %}{{ pos.strategy_name }}{% else %}-{% endif %}
-                            {% if pos.timeInTrade is defined and pos.timeInTrade and pos.timeInTrade != "-" and pos.timeInTrade != "" %}
-                                <span style="color: #8b92b0; margin-left: 8px; font-size: 0.75rem;">({{ pos.timeInTrade }})</span>
-                            {% endif %}
                         </td>
                     </tr>
                     {% endif %}
