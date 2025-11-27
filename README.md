@@ -1,43 +1,161 @@
-# Apex Omni Wallet Viewer
+# TradeViewer - Portfolio Monitor
 
-Multi-wallet portfolio monitoring application with SQLite database for tracking equity, positions, and trade history over time. Features portfolio overview dashboard, per-wallet detailed views, strategy management, automated logging, and comprehensive P&L analytics.
+Multi-wallet portfolio monitoring application for tracking equity, positions, and trade history over time. Supports **Apex Omni** and **Hyperliquid** exchanges with strategy management and P&L analytics.
 
-References:
-- Apex Omni API docs: https://api-docs.pro.apex.exchange/#introduction
-- Python SDK: https://github.com/ApeX-Protocol/apexpro-openapi
+---
 
-## Quick start
+## 🚀 Installation (Step-by-Step)
 
-**Prerequisites:**
-- Python 3.8 or higher
-- pip (Python package manager)
+### What You Need First
 
-**Setup Steps:**
+- **Python 3.8 or higher** - [Download Python](https://www.python.org/downloads/)
+- **Git** (optional) - [Download Git](https://git-scm.com/downloads)
 
-1. **Install dependencies**
+**Not sure if you have Python?** Open a terminal and type:
+```bash
+python3 --version
+```
+If you see `Python 3.8` or higher, you're good!
+
+---
+
+### Step 1: Download the Code
+
+**Option A: Using Git (Recommended)**
+```bash
+# Open terminal and navigate to where you want the app
+cd ~
+
+# Clone the repository
+git clone https://github.com/financetrader/tradeviewer-public.git
+
+# Go into the folder
+cd tradeviewer-public
+```
+
+**Option B: Download ZIP (No Git Required)**
+1. Go to https://github.com/financetrader/tradeviewer-public
+2. Click the green **"Code"** button
+3. Click **"Download ZIP"**
+4. Extract the ZIP file to a folder (e.g., `tradeviewer-public`)
+5. Open terminal and navigate to that folder:
    ```bash
-   pip install -r requirements.txt
+   cd ~/Downloads/tradeviewer-public-main
    ```
 
-2. **Create .env file**
-   ```bash
-   cp env.example .env
-   # Edit .env and set FLASK_SECRET_KEY (generate with: python3 -c "import secrets; print(secrets.token_hex(32))")
-   ```
+---
 
-3. **Start the application**
-   ```bash
-   python app.py
-   ```
+### Step 2: Install Dependencies
 
-4. **Access the application**
-   - **Portfolio Overview:** http://localhost:5000
-   - **Wallets:** http://localhost:5000/admin
-   - **Strategies:** http://localhost:5000/admin/strategies
-   - **Exchange Logs:** http://localhost:5000/admin/exchange-logs
+```bash
+pip install -r requirements.txt
+```
 
-**To stop:**
-Press `Ctrl+C` in the terminal
+**If that doesn't work, try:**
+```bash
+pip3 install -r requirements.txt
+```
+
+---
+
+### Step 3: Create Configuration File
+
+```bash
+cp env.example .env
+```
+
+This creates your local configuration file. The defaults work fine for testing.
+
+**For production**, edit `.env` and set a secure secret key:
+```bash
+# Generate a secret key
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Copy the output and paste it into .env as FLASK_SECRET_KEY=your-key-here
+```
+
+---
+
+### Step 4: Start the Application
+
+```bash
+python app.py
+```
+
+**If that doesn't work, try:**
+```bash
+python3 app.py
+```
+
+You should see output like:
+```
+* Running on http://0.0.0.0:5000
+```
+
+---
+
+### Step 5: Open in Browser
+
+Open your web browser and go to: **http://localhost:5000**
+
+🎉 **You should see the Portfolio Overview dashboard!**
+
+---
+
+### Step 6: Add Your First Wallet
+
+1. Go to **http://localhost:5000/admin**
+2. Click **"Add Wallet"**
+3. Choose your exchange (Apex Omni or Hyperliquid)
+4. Enter your credentials
+5. Click **"Test"** to verify the connection
+6. Click **"Add Wallet"**
+
+Your wallet data will start syncing automatically!
+
+---
+
+## 📱 Quick Links
+
+| Page | URL |
+|------|-----|
+| Portfolio Overview | http://localhost:5000 |
+| Manage Wallets | http://localhost:5000/admin |
+| Manage Strategies | http://localhost:5000/admin/strategies |
+| Exchange Logs | http://localhost:5000/admin/exchange-logs |
+
+---
+
+## ⏹️ How to Stop
+
+Press `Ctrl+C` in the terminal where the app is running.
+
+---
+
+## 🔧 Troubleshooting
+
+**"Command not found: python"**
+- Try `python3` instead of `python`
+- Make sure Python is installed and in your PATH
+
+**"No module named X"**
+- Run `pip install -r requirements.txt` again
+- Try `pip3` instead of `pip`
+
+**"Address already in use"**
+- Another app is using port 5000
+- Stop the other app, or change the port in `app.py`
+
+**Can't connect to exchange**
+- Double-check your API credentials
+- Make sure your API key has read permissions
+
+---
+
+## 📚 References
+
+- [Apex Omni API Docs](https://api-docs.pro.apex.exchange/#introduction)
+- [Apex Python SDK](https://github.com/ApeX-Protocol/apexpro-openapi)
 
 ## Features
 
