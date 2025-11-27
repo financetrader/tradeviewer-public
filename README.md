@@ -1,6 +1,31 @@
 # TradeViewer - Portfolio Monitor
 
-Multi-wallet portfolio monitoring application for tracking equity, positions, and trade history over time. Supports **Apex Omni** and **Hyperliquid** exchanges with strategy management and P&L analytics.
+A self-hosted portfolio monitoring dashboard for crypto traders. Track your equity, positions, and P&L across multiple wallets in one place.
+
+### Why TradeViewer?
+
+- **Multi-Wallet Support** - Monitor all your trading accounts from a single dashboard
+- **Real-Time Sync** - Automatically fetches data from exchanges every 30 minutes
+- **Historical Tracking** - See your equity growth over time with interactive charts
+- **Strategy Attribution** - Tag positions with strategies to track what's actually working
+- **Position Analytics** - Leverage, funding fees, time in trade, and entry/exit prices
+- **Offline-First** - Data stored locally in SQLite - your data stays on your machine
+
+### Supported Exchanges
+
+| Exchange | Features |
+|----------|----------|
+| **Apex Omni** | Full support - positions, trades, equity, P&L |
+| **Hyperliquid** | Read-only via public API - positions, equity |
+| **Property/Assets** | Manual entry for real estate or other holdings |
+
+### What You Can Track
+
+- 📈 **Equity over time** - See your account growth with gap detection for offline periods
+- 💰 **Open positions** - Size, leverage, entry price, unrealized P&L, funding fees
+- 📊 **Closed trades** - Entry/exit prices, realized P&L, trade duration
+- 🎯 **Strategy performance** - Win rate, total P&L, and trade count per strategy
+- 📉 **Per-symbol breakdown** - Which pairs are making or losing money
 
 ---
 
