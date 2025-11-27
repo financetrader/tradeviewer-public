@@ -238,6 +238,29 @@ The application uses two tables for storing trade data:
 - Avoids double-counting when multiple fills make up one trade
 - Same pattern as strategy performance for consistency
 
+### Wallet Win Rate Calculations
+
+**CRITICAL**: Always use `aggregated_trades` table for wallet win rate.
+
+**Function**: `get_win_rates_by_wallet()`
+- **Table**: `aggregated_trades` (no fallback - table always exists)
+- **Fields Used**:
+  - `wallet_id`: Group trades by wallet
+  - `total_pnl`: P&L per complete trade (already aggregated)
+  - `timestamp`: Filter by date range
+- **Calculations**:
+  - Win Rate: `SUM(CASE WHEN total_pnl > 0 THEN 1 ELSE 0 END) / COUNT(*) * 100` grouped by `wallet_id`
+  - Counts complete trades, not individual fills
+- **Parameters**:
+  - `zero_is_loss`: If `True`, count zero PnL as a loss (default). If `False`, count zero PnL as a win.
+
+**Why `aggregated_trades`?**
+- Each row = one complete trade (not individual fills)
+- `total_pnl` already contains the sum of all fills
+- Matches what wallet dashboards display
+- Avoids double-counting when multiple fills make up one trade
+- Consistent with strategy and symbol performance calculations
+
 ### Other Key Tables
 
 #### `equity_snapshots`

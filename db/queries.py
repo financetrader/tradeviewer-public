@@ -1019,7 +1019,10 @@ def get_trade_counts_by_wallet(session: Session, start: datetime, end: datetime,
 
 
 def get_win_rates_by_wallet(session: Session, start: datetime, end: datetime, zero_is_loss: bool = True, wallet_id: Optional[int] = None) -> Dict[int, float]:
-    """Calculate win rate per wallet in [start, end). Win = closed_pnl > 0.
+    """Calculate win rate per wallet in [start, end). Win = total_pnl > 0.
+    
+    Uses AggregatedTrade table where PNL per trade is already stored.
+    Counts complete trades, not individual fills.
 
     Args:
         session: Database session
@@ -1031,32 +1034,34 @@ def get_win_rates_by_wallet(session: Session, start: datetime, end: datetime, ze
     Returns:
         Dict mapping wallet_id to win rate percentage
     """
+    from db.models import AggregatedTrade
+    from sqlalchemy import func, case
+
+    # Determine win condition based on zero_is_loss parameter
+    win_condition = AggregatedTrade.total_pnl >= 0 if not zero_is_loss else AggregatedTrade.total_pnl > 0
+
     query = (
-        session.query(ClosedTrade.wallet_id, ClosedTrade.closed_pnl)
-        .filter(ClosedTrade.wallet_id.isnot(None))
-        .filter(ClosedTrade.timestamp >= start)
-        .filter(ClosedTrade.timestamp < end)
+        session.query(
+            AggregatedTrade.wallet_id,
+            func.sum(case((win_condition, 1), else_=0)).label('wins'),
+            func.count(AggregatedTrade.id).label('total')
+        )
+        .filter(AggregatedTrade.wallet_id.isnot(None))
+        .filter(AggregatedTrade.timestamp >= start)
+        .filter(AggregatedTrade.timestamp < end)
+        .group_by(AggregatedTrade.wallet_id)
     )
 
     if wallet_id:
-        query = query.filter(ClosedTrade.wallet_id == wallet_id)
+        query = query.filter(AggregatedTrade.wallet_id == wallet_id)
 
-    trades = query.all()
-
-    wallet_stats: Dict[int, tuple[int, int]] = {}  # wallet_id -> (wins, total)
-    for wid, pnl in trades:
-        if wid is None:
-            continue
-        wid = int(wid)
-        if wid not in wallet_stats:
-            wallet_stats[wid] = (0, 0)
-        wins, total = wallet_stats[wid]
-        total += 1
-        if pnl > 0 or (not zero_is_loss and pnl == 0):
-            wins += 1
-        wallet_stats[wid] = (wins, total)
-
-    return {wid: (wins / total * 100.0 if total > 0 else 0.0) for wid, (wins, total) in wallet_stats.items()}
+    rows = query.all()
+    
+    return {
+        int(wid): (wins / total * 100.0 if total > 0 else 0.0)
+        for wid, wins, total in rows
+        if wid is not None
+    }
 
 
 def get_strategy_performance(session: Session, start: datetime, end: datetime, wallet_id: Optional[int] = None) -> List[Dict[str, Any]]:
