@@ -8,7 +8,7 @@ This directory contains everything needed to deploy the wallet monitoring applic
 - **Dependencies**: requirements.txt
 - **Configuration Template**: env.example (copy to .env and configure)
 - **Database**: data/wallet.db (your existing database with all data)
-- **Database Backup**: data/wallet_backup_20251106_150411.db (backup copy)
+- **Database Backup**: Create your own backup before deployment
 - **Documentation**: README.md and docs/ directory
 
 ## Deployment Steps
