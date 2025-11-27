@@ -168,6 +168,7 @@ latest = session.query(EquitySnapshot).filter(
 | `id` | `Integer` | NO | auto | **Primary key** - Unique identifier for this position snapshot. Auto-incremented integer. Used internally for record identification. |
 | `wallet_id` | `Integer` | YES | - | **Legacy wallet identifier** - Links to `wallet_configs.id`. Maintained for backward compatibility. **For new code, use `wallet_address` instead.** Example: `1`, `2`, `3` |
 | `wallet_address` | `String(500)` | YES | - | **Primary wallet identifier** - The wallet address from `wallet_configs.wallet_address`. Used to link position snapshots to wallets. **Preferred identifier for new code.** Example: `"0x1234..."`, `"apex_account_123"` |
+| `position_id` | `Integer` | YES | - | **Foreign key to positions** - Links to `positions.id`. Identifies which position lifecycle this snapshot belongs to. All snapshots for the same position share the same `position_id`. When a position closes and reopens, a new `position_id` is assigned. NULL for legacy data not yet backfilled. |
 | `timestamp` | `DateTime` | NO | - | **Snapshot timestamp** - When this position snapshot was taken. Typically every 5 minutes or on manual refresh. Used for time-series analysis and position history. Format: UTC datetime. Example: `2025-01-15 14:30:00` |
 | `symbol` | `String(50)` | NO | - | **Trading symbol** - The trading pair or instrument identifier. Format varies by exchange. Examples: `"BTC/USD"`, `"ETH-PERP"`, `"SOL/USD"`. Used to identify which asset this position is for. |
 | `side` | `String(10)` | NO | - | **Position side** - Direction of the position. Values: `'LONG'` (betting price goes up, buying), `'SHORT'` (betting price goes down, selling). Determines P&L calculation direction. |
@@ -193,6 +194,7 @@ latest = session.query(EquitySnapshot).filter(
 - `idx_position_wallet_id_timestamp` on (`wallet_id`, `timestamp`)
 - `idx_position_symbol_timestamp` on (`symbol`, `timestamp`)
 - `idx_position_timestamp` on (`timestamp`)
+- `idx_position_snapshot_position_id` on (`position_id`) - For joining to positions table
 
 **Data Flow**:
 - Created every **5 minutes** (or on manual refresh) for each **open position**
@@ -221,7 +223,58 @@ history = session.query(PositionSnapshot).filter(
 
 ---
 
-### 4. `closed_trades`
+### 4. `positions`
+
+**Purpose**: Track position lifecycles with unique IDs. Each record represents one open→close cycle.
+
+**When to use**:
+- Link multiple position snapshots to the same position lifecycle
+- Track when positions were opened and closed
+- Query historical positions (both open and closed)
+- Get authoritative `opened_at` timestamp for time-in-trade calculations
+
+**Fields**:
+
+| Field | Type | Null | Default | Description |
+|-------|------|------|---------|-------------|
+| `id` | `Integer` | NO | auto | **Primary key** - Unique position ID. Referenced by `position_snapshots.position_id`. Displayed in UI as "#1", "#2", etc. |
+| `wallet_id` | `Integer` | NO | - | **Foreign key to wallet_configs** - Which wallet owns this position. |
+| `symbol` | `String(50)` | NO | - | **Trading symbol** - The trading pair. Example: `"BTC-USDT"`, `"SOL-USDT"`. |
+| `side` | `String(10)` | NO | - | **Position side** - `"LONG"` or `"SHORT"`. |
+| `opened_at` | `DateTime` | NO | - | **When position was first opened** - Authoritative timestamp for this position lifecycle. Used for time-in-trade calculation. |
+| `closed_at` | `DateTime` | YES | - | **When position was fully closed** - NULL if position is still open. Set when a closing trade is detected. |
+| `entry_price` | `Float` | YES | - | **Entry price when opened** - Price at which position was opened. |
+| `exit_price` | `Float` | YES | - | **Exit price when closed** - Price at which position was closed. NULL if still open. |
+| `realized_pnl` | `Float` | YES | - | **Final realized P&L** - Total profit/loss when position closed. NULL if still open. |
+| `created_at` | `DateTime` | NO | `utcnow()` | **Record creation timestamp** |
+
+**Indexes**:
+- `idx_position_wallet_symbol_side` on (`wallet_id`, `symbol`, `side`)
+- `idx_position_wallet_open` on (`wallet_id`, `closed_at`) - For finding open positions
+
+**Key Behaviors**:
+- ✅ **One position per lifecycle**: When a position closes and reopens, a NEW position record is created
+- ✅ **Open positions**: `closed_at IS NULL` means position is still open
+- ✅ **Side flips**: LONG closing + SHORT opening = two separate position records
+- ⚠️ **Partial closes**: Position ID stays same during partial closes (not tested extensively)
+
+**Example Query**:
+```python
+# Get all open positions for a wallet
+open_positions = session.query(Position).filter(
+    Position.wallet_id == wallet_id,
+    Position.closed_at.is_(None)
+).all()
+
+# Get position history (all positions ever opened)
+all_positions = session.query(Position).filter(
+    Position.wallet_id == wallet_id
+).order_by(Position.opened_at.desc()).all()
+```
+
+---
+
+### 5. `closed_trades`
 
 **Purpose**: Raw individual fills/executions from exchange APIs.
 
@@ -284,7 +337,7 @@ fills = session.query(ClosedTrade).filter(
 
 ---
 
-### 5. `aggregated_trades` ⭐ **PRIMARY TABLE FOR DISPLAY**
+### 6. `aggregated_trades` ⭐ **PRIMARY TABLE FOR DISPLAY**
 
 **Purpose**: Complete trades (opening + closing leg combined) for UI display.
 
@@ -348,7 +401,7 @@ strategy_pnl = session.query(func.sum(AggregatedTrade.total_pnl)).filter(
 
 ---
 
-### 6. `strategies`
+### 7. `strategies`
 
 **Purpose**: Strategy catalog/master list.
 
@@ -382,7 +435,7 @@ strategy = session.query(Strategy).filter(Strategy.name == 'My Strategy').first(
 
 ---
 
-### 7. `strategy_assignments`
+### 8. `strategy_assignments`
 
 **Purpose**: Time-bounded strategy assignments per wallet and symbol.
 

@@ -115,6 +115,35 @@ class EquitySnapshot(Base):
         return f"<EquitySnapshot(timestamp={self.timestamp}, total_equity={self.total_equity})>"
 
 
+class Position(Base):
+    """Track position lifecycles with unique IDs.
+    
+    Each position represents a single open→close lifecycle for a wallet+symbol+side.
+    When a position is closed and reopened, a new Position record is created.
+    """
+    __tablename__ = 'positions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    wallet_id = Column(Integer, nullable=False)  # FK to wallet_configs.id
+    symbol = Column(String(50), nullable=False)
+    side = Column(String(10), nullable=False)  # LONG or SHORT
+    opened_at = Column(DateTime, nullable=False)  # When position was first opened
+    closed_at = Column(DateTime, nullable=True)  # When position was fully closed (NULL = still open)
+    entry_price = Column(Float, nullable=True)  # Entry price when opened
+    exit_price = Column(Float, nullable=True)  # Exit price when closed
+    realized_pnl = Column(Float, nullable=True)  # Final P&L when closed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_position_wallet_symbol_side', 'wallet_id', 'symbol', 'side'),
+        Index('idx_position_wallet_open', 'wallet_id', 'closed_at'),  # For finding open positions
+    )
+
+    def __repr__(self):
+        status = "OPEN" if self.closed_at is None else "CLOSED"
+        return f"<Position(id={self.id}, symbol={self.symbol}, side={self.side}, status={status})>"
+
+
 class PositionSnapshot(Base):
     """Historical position snapshots with metrics."""
     __tablename__ = 'position_snapshots'
@@ -122,6 +151,7 @@ class PositionSnapshot(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     wallet_id = Column(Integer, nullable=True)  # Legacy: use wallet_address instead
     wallet_address = Column(String(500), nullable=True)  # Primary key for wallet association
+    position_id = Column(Integer, nullable=True)  # FK to positions.id - links snapshot to position lifecycle
     timestamp = Column(DateTime, nullable=False)
     symbol = Column(String(50), nullable=False)
     side = Column(String(10), nullable=False)  # LONG or SHORT
@@ -147,6 +177,7 @@ class PositionSnapshot(Base):
         Index('idx_position_wallet_id_timestamp', 'wallet_id', 'timestamp'),
         Index('idx_position_symbol_timestamp', 'symbol', 'timestamp'),
         Index('idx_position_timestamp', 'timestamp'),
+        Index('idx_position_snapshot_position_id', 'position_id'),  # For joining to positions table
     )
     
     def __repr__(self):
