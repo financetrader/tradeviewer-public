@@ -292,6 +292,26 @@ The application uses two tables for storing trade data:
   - `opened_at` field stores the exact timestamp when position was first opened
   - Displayed in wallet dashboard "Opened" column as `YYYY-MM-DD HH:MM:SS`
   - Time-in-trade duration calculated from `opened_at` to current time, displayed below timestamp (e.g., "17h 31m")
+- **Position ID Tracking**:
+  - `position_id` (Integer): Links snapshot to a position lifecycle in the `positions` table
+  - All snapshots for the same position share the same `position_id`
+  - When a position closes and reopens, it gets a NEW `position_id`
+
+#### `positions`
+- **Purpose**: Track position lifecycles with unique IDs
+- **Key Fields**:
+  - `id` (Integer): Unique position ID (displayed as "#1", "#2", etc.)
+  - `wallet_id` (Integer): Which wallet owns this position
+  - `symbol` (String): Trading pair (e.g., "BTC-USDT")
+  - `side` (String): "LONG" or "SHORT"
+  - `opened_at` (DateTime): **Authoritative timestamp** for when position opened
+  - `closed_at` (DateTime): When position closed (NULL if still open)
+  - `entry_price`, `exit_price`, `realized_pnl`: Trade details
+- **Lifecycle Tracking**:
+  - Open positions: `closed_at IS NULL`
+  - Closed positions: `closed_at IS NOT NULL`
+  - Side flips: LONG closing + SHORT opening = two separate positions
+  - Partial closes: Same `position_id` until fully closed (untested)
 
 #### `strategies` & `strategy_assignments`
 - **Purpose**: Strategy catalog and wallet+symbol assignments
@@ -303,7 +323,7 @@ The application uses two tables for storing trade data:
 |----------|-----------|---------|
 | `get_aggregated_closed_trades()` | `aggregated_trades` | Wallet dashboard Closed P&L tab |
 | `get_recent_trades()` | `aggregated_trades` | Portfolio overview Recent Trades |
-| `get_open_positions()` | `position_snapshots` | Wallet dashboard Positions table (includes `funding_fee`, `opened_at`, `timeInTrade`) |
+| `get_open_positions()` | `position_snapshots` + `positions` | Wallet dashboard Positions table (includes `position_id`, `funding_fee`, `opened_at`, `timeInTrade`) |
 | `get_strategy_performance()` | `aggregated_trades` | Strategy Performance card |
 | `get_symbol_performance()` | `aggregated_trades` | Top Symbols by PnL card |
 | `get_closed_trades()` | `closed_trades` | Fallback, detailed fill analysis |

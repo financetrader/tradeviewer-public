@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional, TypedDict
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, func, and_
-from db.models import EquitySnapshot, PositionSnapshot, ClosedTrade
+from db.models import EquitySnapshot, PositionSnapshot, ClosedTrade, Position
 from utils.data_utils import normalize_symbol
 
 
@@ -662,6 +662,59 @@ def insert_equity_snapshot(session: Session, data: EquitySnapshotDataDict) -> Eq
     return snapshot
 
 
+def get_or_create_position(
+    session: Session,
+    wallet_id: int,
+    symbol: str,
+    side: str,
+    opened_at: datetime,
+    entry_price: Optional[float] = None
+) -> Position:
+    """
+    Get an existing open position or create a new one.
+    
+    A position is considered "open" if closed_at is NULL.
+    If no open position exists for this wallet+symbol+side, creates a new one.
+    
+    Args:
+        session: Database session
+        wallet_id: Wallet ID
+        symbol: Trading symbol (e.g., "BTC-USDT")
+        side: Position side ("LONG" or "SHORT")
+        opened_at: Timestamp when position was opened
+        entry_price: Entry price (optional)
+    
+    Returns:
+        Position object (existing open or newly created)
+    """
+    # Normalize side to uppercase
+    side = side.upper() if side else "LONG"
+    
+    # Look for existing open position (closed_at IS NULL)
+    existing = session.query(Position).filter(
+        Position.wallet_id == wallet_id,
+        Position.symbol == symbol,
+        Position.side == side,
+        Position.closed_at.is_(None)
+    ).first()
+    
+    if existing:
+        return existing
+    
+    # Create new position
+    position = Position(
+        wallet_id=wallet_id,
+        symbol=symbol,
+        side=side,
+        opened_at=opened_at,
+        entry_price=entry_price
+    )
+    session.add(position)
+    session.flush()  # Get the ID assigned
+    
+    return position
+
+
 def insert_position_snapshot(session: Session, data: PositionSnapshotDataDict) -> PositionSnapshot:
     """
     Insert a new position snapshot.
@@ -677,9 +730,13 @@ def insert_position_snapshot(session: Session, data: PositionSnapshotDataDict) -
     wallet_id = data.get('wallet_id')
     symbol = data['symbol']
     current_size = float(data['size'])
+    side = data['side']
+    entry_price = float(data['entry_price']) if data.get('entry_price') else None
     
-    # Calculate opened_at: when this position was first opened
+    # Get or create position record for tracking lifecycle
+    position_id = None
     opened_at = None
+    
     if wallet_id and current_size > 0:
         # First, try to get API timestamp from raw_data (most accurate)
         raw_data = data.get('raw_data')
@@ -693,35 +750,30 @@ def insert_position_snapshot(session: Session, data: PositionSnapshotDataDict) -
                 except (ValueError, TypeError):
                     pass
         
-        # Check if this position already exists (has previous snapshots with size > 0)
-        prev_snapshot = (
-            session.query(PositionSnapshot)
-            .filter(PositionSnapshot.wallet_id == wallet_id)
-            .filter(PositionSnapshot.symbol == symbol)
-            .filter(PositionSnapshot.size > 0)
-            .filter(PositionSnapshot.timestamp < current_timestamp)
-            .order_by(desc(PositionSnapshot.timestamp))
-            .first()
-        )
+        # Determine opened_at timestamp for new positions
+        position_opened_at = api_timestamp or current_timestamp
         
-        if prev_snapshot and prev_snapshot.opened_at:
-            # Position continues - use existing opened_at
-            opened_at = prev_snapshot.opened_at
-        elif api_timestamp:
-            # New position - use API timestamp (most accurate)
-            opened_at = api_timestamp
-        else:
-            # Fallback to current timestamp if API timestamp not available
-            opened_at = current_timestamp
+        # Get or create position record
+        position = get_or_create_position(
+            session=session,
+            wallet_id=wallet_id,
+            symbol=symbol,
+            side=side,
+            opened_at=position_opened_at,
+            entry_price=entry_price
+        )
+        position_id = position.id
+        opened_at = position.opened_at  # Use authoritative timestamp from position record
     
     snapshot = PositionSnapshot(
         wallet_id=wallet_id,
         wallet_address=None,  # No longer used as identifier
+        position_id=position_id,  # Link to position lifecycle
         timestamp=current_timestamp,
         symbol=symbol,
-        side=data['side'],
+        side=side,
         size=current_size,
-        entry_price=float(data['entry_price']),  # type: ignore
+        entry_price=entry_price or 0.0,
         current_price=float(data['current_price']) if data.get('current_price') else None,  # type: ignore
         position_size_usd=float(data['position_size_usd']),  # type: ignore
         leverage=float(data['leverage']) if data.get('leverage') else None,  # type: ignore
@@ -731,7 +783,7 @@ def insert_position_snapshot(session: Session, data: PositionSnapshotDataDict) -
         raw_data=data.get('raw_data'),  # Store complete API response
         initial_margin_at_open=float(data['initial_margin_at_open']) if data.get('initial_margin_at_open') is not None else None,  # type: ignore
         calculation_method=data.get('calculation_method'),  # How leverage was calculated
-        opened_at=opened_at  # When position was first opened
+        opened_at=opened_at  # When position was first opened (from position record)
     )
     session.add(snapshot)
     return snapshot
@@ -1430,7 +1482,7 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
 
     Returns:
         List of dicts with wallet_id, wallet_name, symbol, side, size, entry_price,
-        current_price, unrealized_pnl, position_size_usd, strategy_name
+        current_price, unrealized_pnl, position_size_usd, strategy_name, position_id
     """
     from db.models import WalletConfig
     from db.models_strategies import Strategy
@@ -1450,11 +1502,14 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
     subq = subq.group_by(PositionSnapshot.wallet_id).subquery()
 
     # Get positions at latest timestamp where size > 0
+    # LEFT JOIN to Position table to get authoritative opened_at
     query = (
         session.query(
             PositionSnapshot,
             WalletConfig.name.label("wallet_name"),
-            Strategy.name.label("strategy_name")
+            Strategy.name.label("strategy_name"),
+            Position.opened_at.label("position_opened_at"),
+            Position.id.label("pos_id")
         )
         .join(subq, and_(
             PositionSnapshot.wallet_id == subq.c.wid,
@@ -1462,28 +1517,33 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
         ))
         .join(WalletConfig, PositionSnapshot.wallet_id == WalletConfig.id)
         .outerjoin(Strategy, PositionSnapshot.strategy_id == Strategy.id)
+        .outerjoin(Position, PositionSnapshot.position_id == Position.id)
         .filter(PositionSnapshot.size > 0)
     )
 
     if wallet_id:
         query = query.filter(PositionSnapshot.wallet_id == wallet_id)
 
-    # Sort by opened_at (when position was first opened) DESC - newest positions first
-    query = query.order_by(desc(PositionSnapshot.opened_at))
+    # Sort by opened_at DESC - newest positions first
+    # Use Position.opened_at if available, fallback to snapshot's opened_at
+    query = query.order_by(desc(func.coalesce(Position.opened_at, PositionSnapshot.opened_at)))
 
     results = []
-    for pos, wallet_name, strategy_name in query.all():
-        # Calculate time in trade from opened_at (uses API timestamps when available)
+    for pos, wallet_name, strategy_name, position_opened_at, pos_id in query.all():
+        # Use Position.opened_at (authoritative) if available, fallback to snapshot's opened_at
+        opened_at = position_opened_at or pos.opened_at
+        
+        # Calculate time in trade from opened_at
         time_in_trade = None
         opened_formatted = None
-        if pos.opened_at:
+        if opened_at:
             try:
                 from services.data_service import format_duration
                 now = datetime.utcnow()
-                duration_seconds = (now - pos.opened_at).total_seconds()
+                duration_seconds = (now - opened_at).total_seconds()
                 if duration_seconds > 0:
                     time_in_trade = format_duration(duration_seconds)
-                    opened_formatted = pos.opened_at.strftime("%Y-%m-%d %H:%M")
+                    opened_formatted = opened_at.strftime("%Y-%m-%d %H:%M")
             except Exception:
                 pass
         
@@ -1509,6 +1569,7 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
         results.append({
             'wallet_id': pos.wallet_id,
             'wallet_name': wallet_name,
+            'position_id': pos_id or pos.position_id,  # From JOIN or snapshot
             'symbol': normalize_symbol(str(pos.symbol)),
             'side': pos.side,
             'size': float(pos.size),
@@ -1521,7 +1582,7 @@ def get_open_positions(session: Session, wallet_id: Optional[int] = None) -> Lis
             'funding_fee': float(pos.funding_fee) if pos.funding_fee is not None else None,
             'strategy_name': strategy_name,
             'timestamp': pos.timestamp,
-            'opened_at': pos.opened_at,
+            'opened_at': opened_at,
             'timeInTrade': time_in_trade or "-",
             'openedFormatted': opened_formatted or "-",
         })

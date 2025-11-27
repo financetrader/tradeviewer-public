@@ -232,6 +232,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th>ID</th>
                         <th>Symbol</th>
                         <th>Side</th>
                         <th>Size</th>
@@ -250,6 +251,7 @@
                     {% for pos in positions %}
                     {% if pos.size|float != 0 %}
                     <tr>
+                        <td style="color: #8b92b0; font-size: 0.85rem;">#{{ pos.position_id if pos.position_id else '-' }}</td>
                         <td><strong>{{ pos.symbol }}</strong></td>
                         <td><span class="badge badge-{{ pos.side|lower }}">{{ pos.side }}</span></td>
                         <td>{{ pos.size }}</td>

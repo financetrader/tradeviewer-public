@@ -3,8 +3,54 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
-from db.models import ClosedTrade, AggregatedTrade
+from db.models import ClosedTrade, AggregatedTrade, Position
 from db.queries import normalize_symbol
+
+
+def close_position(
+    session: Session,
+    wallet_id: int,
+    symbol: str,
+    side: str,
+    closed_at: datetime,
+    exit_price: Optional[float] = None,
+    realized_pnl: Optional[float] = None
+) -> Optional[Position]:
+    """
+    Mark an open position as closed.
+    
+    Finds the open position for wallet+symbol+side and sets closed_at.
+    
+    Args:
+        session: Database session
+        wallet_id: Wallet ID
+        symbol: Trading symbol
+        side: Position side ("LONG" or "SHORT")
+        closed_at: When position was closed
+        exit_price: Exit price (optional)
+        realized_pnl: Realized P&L (optional)
+    
+    Returns:
+        Updated Position object, or None if no open position found
+    """
+    side = side.upper() if side else "LONG"
+    
+    position = session.query(Position).filter(
+        Position.wallet_id == wallet_id,
+        Position.symbol == symbol,
+        Position.side == side,
+        Position.closed_at.is_(None)
+    ).first()
+    
+    if position:
+        position.closed_at = closed_at
+        if exit_price is not None:
+            position.exit_price = exit_price
+        if realized_pnl is not None:
+            position.realized_pnl = realized_pnl
+        return position
+    
+    return None
 
 
 def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) -> int:
@@ -127,6 +173,17 @@ def sync_aggregated_trades(session: Session, wallet_id: Optional[int] = None) ->
                 AggregatedTrade.symbol == lookup_key[1],
             )
         ).first()
+
+        # Mark the position as closed
+        close_position(
+            session=session,
+            wallet_id=closing_leg.wallet_id,
+            symbol=lookup_key[1],
+            side=position_side,
+            closed_at=closing_leg.timestamp,
+            exit_price=closing_leg.exit_price,
+            realized_pnl=total_pnl
+        )
 
         if existing:
             # Update existing
