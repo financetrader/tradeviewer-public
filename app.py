@@ -54,6 +54,10 @@ except ImportError:
     CSRFError = None
     print("Warning: Flask-WTF not installed. CSRF protection disabled. Install with: pip install Flask-WTF")
 
+# Authentication
+from flask_login import login_required, login_user, logout_user, current_user
+from utils.auth import User, init_login_manager
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -104,6 +108,9 @@ else:
         return render_template('error.html',
                              error_code=400,
                              error_message=error_msg), 400
+
+# Initialize Flask-Login
+login_manager = init_login_manager(app)
 
 # Ensure session exists for CSRF
 @app.before_request
@@ -197,6 +204,46 @@ def health():
         }), 503
 
 
+@app.route("/login", methods=['GET', 'POST'])
+def login():
+    """Login page and authentication handler."""
+    # Already logged in - redirect to dashboard
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username = sanitize_string(request.form.get('username', ''), max_length=50)
+        password = request.form.get('password', '')
+        remember = request.form.get('remember') == 'on'
+        
+        if User.validate_credentials(username, password):
+            user = User(username)
+            login_user(user, remember=remember)
+            app.logger.info(f"User '{username}' logged in from {request.remote_addr}")
+            
+            # Redirect to requested page or default to dashboard
+            next_page = request.args.get('next')
+            if next_page and next_page.startswith('/'):
+                return redirect(next_page)
+            return redirect(url_for('index'))
+        
+        app.logger.warning(f"Failed login attempt for user '{username}' from {request.remote_addr}")
+        flash('Invalid username or password', 'error')
+    
+    return render_template('login.html')
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    """Log out the current user."""
+    username = current_user.id if current_user.is_authenticated else 'unknown'
+    logout_user()
+    app.logger.info(f"User '{username}' logged out")
+    flash('You have been logged out.', 'success')
+    return redirect(url_for('login'))
+
+
 def _parse_time_range():
     """Parse time range from query params. Default: 7d."""
     period = sanitize_string(request.args.get("period") or "7d", max_length=10, allow_empty=False).lower()
@@ -230,6 +277,7 @@ def debug_dashboard():
 
 
 @app.route("/")
+@login_required
 def index():
     """Portfolio overview dashboard with aggregated metrics (read-only from database)."""
     try:
@@ -359,6 +407,7 @@ def index():
 
 
 @app.route("/wallet/<int:wallet_id>")
+@login_required
 def wallet_dashboard(wallet_id):
     """Dashboard for specific wallet."""
     app.logger.info(f"=== Starting wallet_dashboard for wallet_id: {wallet_id} ===")
@@ -505,6 +554,7 @@ def wallet_dashboard(wallet_id):
 
 
 @app.route("/admin/exchange-logs")
+@login_required
 def admin_exchange_logs():
     """Admin page showing the last N exchange traffic log lines."""
     try:
@@ -532,6 +582,7 @@ def admin_exchange_logs():
 
 
 @app.route("/admin")
+@login_required
 def admin():
     """Wallets page for wallet management."""
     with get_session() as session:
@@ -557,6 +608,7 @@ def admin():
 
 
 @app.route("/admin/add_wallet", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def add_wallet():
@@ -622,6 +674,7 @@ def add_wallet():
 
 
 @app.route("/admin/test_wallet/<int:wallet_id>")
+@login_required
 @limiter.limit(RATE_LIMITS['test_wallet'])
 def test_wallet(wallet_id):
     """Test wallet connection and return JSON result."""
@@ -667,6 +720,7 @@ def test_wallet(wallet_id):
 
 
 @app.route("/admin/edit_wallet/<int:wallet_id>", methods=['GET', 'POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'], methods=['POST'])
 @csrf.exempt
 def edit_wallet(wallet_id):
@@ -760,6 +814,7 @@ def edit_wallet(wallet_id):
 
 
 @app.route("/admin/delete_wallet/<int:wallet_id>", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def delete_wallet(wallet_id):
@@ -800,6 +855,7 @@ def delete_wallet(wallet_id):
 
 
 @app.route("/api/provider_instructions/<provider>")
+@login_required
 def get_provider_instructions_api(provider):
     """Get provider setup instructions via API."""
     instructions = get_provider_instructions(provider)
@@ -807,6 +863,7 @@ def get_provider_instructions_api(provider):
 
 
 @app.route("/admin/strategies")
+@login_required
 def admin_strategies():
     """Manage strategies and assignments."""
     with get_session() as session:
@@ -967,6 +1024,7 @@ def admin_strategies():
 
 
 @app.route("/admin/strategies/add", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_add_strategy():
@@ -985,6 +1043,7 @@ def admin_add_strategy():
 
 
 @app.route("/admin/strategies/edit/<int:strategy_id>", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_edit_strategy(strategy_id):
@@ -1015,6 +1074,7 @@ def admin_edit_strategy(strategy_id):
 
 
 @app.route("/admin/strategies/delete/<int:strategy_id>", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_delete_strategy(strategy_id):
@@ -1041,6 +1101,7 @@ def admin_delete_strategy(strategy_id):
 
 
 @app.route("/admin/strategies/bulk_add", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_bulk_add_strategies():
@@ -1084,6 +1145,7 @@ def admin_bulk_add_strategies():
 
 
 @app.route("/admin/strategies/assign", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_assign_strategy():
@@ -1205,6 +1267,7 @@ def admin_assign_strategy():
 
 
 @app.route("/api/wallets/refresh-all", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['api'])
 @csrf.exempt
 def api_refresh_all_wallets():
@@ -1265,6 +1328,7 @@ def api_refresh_all_wallets():
 
 
 @app.route("/api/wallet/<int:wallet_id>/refresh", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['api'])
 @csrf.exempt
 def api_refresh_wallet(wallet_id):
@@ -1297,6 +1361,7 @@ def api_refresh_wallet(wallet_id):
 
 
 @app.route("/api/symbol-suggestions", methods=['GET'])
+@login_required
 @limiter.limit(RATE_LIMITS['api'])
 def get_symbol_suggestions():
     """
@@ -1331,6 +1396,7 @@ def get_symbol_suggestions():
 
 
 @app.route("/admin/strategies/end/<int:assignment_id>", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_end_assignment(assignment_id):
@@ -1353,6 +1419,7 @@ def admin_end_assignment(assignment_id):
 
 
 @app.route("/admin/strategies/assignment/<int:assignment_id>/delete", methods=['POST'])
+@login_required
 @limiter.limit(RATE_LIMITS['admin'])
 @csrf.exempt
 def admin_delete_assignment(assignment_id):

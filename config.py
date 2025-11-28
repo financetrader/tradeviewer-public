@@ -16,6 +16,11 @@ class Config:
     SESSION_COOKIE_SECURE = False  # Set to True only when using HTTPS
     SESSION_COOKIE_HTTPONLY = True  # No JS access
     SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
+    
+    # Remember Me (Flask-Login)
+    REMEMBER_COOKIE_DURATION = timedelta(days=7)
+    REMEMBER_COOKIE_SECURE = False  # Set to True only when using HTTPS
+    REMEMBER_COOKIE_HTTPONLY = True
 
     # Database
     SQLALCHEMY_TRACK_MODIFICATIONS = False
