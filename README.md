@@ -99,6 +99,15 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 # Copy the output and paste it into .env as FLASK_SECRET_KEY=your-key-here
 ```
 
+**Set login credentials** (required):
+```bash
+# Edit .env and add:
+ADMIN_USER=admin
+ADMIN_PASSWORD=your-secure-password-here
+```
+
+The app requires login to access. Default username is `admin` - set your password in `.env`.
+
 ---
 
 ### Step 4: Start the Application
@@ -148,6 +157,29 @@ Your wallet data will start syncing automatically!
 | Manage Wallets | http://localhost:5000/admin |
 | Manage Strategies | http://localhost:5000/admin/strategies |
 | Exchange Logs | http://localhost:5000/admin/exchange-logs |
+
+---
+
+## 🔐 Authentication
+
+The app requires login to access all pages (except `/health` for monitoring).
+
+### Login Credentials
+
+Set your credentials in `.env`:
+```bash
+ADMIN_USER=admin           # Username (default: admin)
+ADMIN_PASSWORD=changeme    # Your password (CHANGE THIS!)
+```
+
+### Changing Your Password
+
+Just update `ADMIN_PASSWORD` in `.env` and restart the app. No database changes needed.
+
+### Session Duration
+
+- **Without "Keep me logged in"**: 30 minutes
+- **With "Keep me logged in"**: 1 year (permanent)
 
 ---
 

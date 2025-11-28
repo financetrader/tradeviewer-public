@@ -255,6 +255,9 @@
             </div>
             <div class="navbar-right">
                 {% block navbar_right %}{% endblock %}
+                {% if current_user.is_authenticated %}
+                <a href="/logout" class="nav-link nav-link-secondary" title="Logout">🚪 Logout</a>
+                {% endif %}
             </div>
         </div>
 
